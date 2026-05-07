@@ -22,11 +22,26 @@
 
 	let { mode, channel, allAgents, currentMemberIds = [], onSubmit, onCancel }: Props = $props();
 
-	let name = $state(channel?.name ?? '');
-	let description = $state(channel?.description ?? '');
-	let selectedMembers = $state<Set<string>>(new Set(currentMemberIds));
+	// Form-state. Initialised from props on first render and whenever the
+	// inbound channel identity changes (so opening the modal for a
+	// different channel resets fields). The `initializedFor` sentinel
+	// prevents user edits from being stomped on subsequent renders that
+	// happen for unrelated reasons (e.g. a parent re-render).
+	let name = $state('');
+	let description = $state('');
+	let selectedMembers = $state<Set<string>>(new Set());
 	let submitting = $state(false);
 	let errorMsg = $state<string | null>(null);
+	let initializedFor = $state<string | null>(null);
+
+	$effect(() => {
+		const key = channel?.id ?? '__create__';
+		if (initializedFor === key) return;
+		name = channel?.name ?? '';
+		description = channel?.description ?? '';
+		selectedMembers = new Set(currentMemberIds);
+		initializedFor = key;
+	});
 
 	function toggle(agentId: string) {
 		const next = new Set(selectedMembers);
