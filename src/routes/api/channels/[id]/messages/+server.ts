@@ -1,24 +1,41 @@
 /**
- * GET /api/channels/:id/messages — recent messages for a channel.
+ * GET /api/channels/:id/messages
  *
- * Query params:
- *   limit:  cap on rows returned (1..1000, default 200)
- *   before: millisecond timestamp; returns messages strictly older
- *           than this. Used for 'load older' pagination at the
- *           scroll-top.
+ * Three modes:
  *
- * Result is oldest-first regardless of which slice was fetched.
+ *   ?limit=N                Most recent N messages (default mode).
+ *   ?limit=N&before=<ms>    Page of N messages older than `before`.
+ *                           Used by the 'load older' pagination button.
+ *   ?budget=KB              Recent messages capped on cumulative body
+ *                           size in kilobytes. Used by the initial
+ *                           channel-view load (issue #13). Reply
+ *                           includes `has_more: boolean` so the UI
+ *                           knows whether 'load older' makes sense.
+ *
+ * `budget` and `before` are mutually exclusive; if both are given,
+ * `before` wins (paginating older history is a deliberate user
+ * action).
+ *
+ * Result is always oldest-first.
  */
 
 import { json } from '@sveltejs/kit';
-import { recentMessages } from '$lib/server/messages';
+import { recentMessages, recentMessagesByBudget } from '$lib/server/messages';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, url }) => {
 	const limitRaw = url.searchParams.get('limit');
-	const limit = limitRaw ? Math.min(Math.max(Number(limitRaw), 1), 1000) : 200;
 	const beforeRaw = url.searchParams.get('before');
+	const budgetRaw = url.searchParams.get('budget');
+
+	const limit = limitRaw ? Math.min(Math.max(Number(limitRaw), 1), 1000) : 200;
 	const before = beforeRaw ? Number(beforeRaw) : undefined;
+
+	if (budgetRaw && !before) {
+		const budgetKb = Math.min(Math.max(Number(budgetRaw), 1), 4096);
+		const { rows, hasMore } = recentMessagesByBudget(params.id, budgetKb * 1024);
+		return json({ messages: rows, has_more: hasMore });
+	}
 
 	const rows = recentMessages(params.id, limit, before);
 	return json({ messages: rows });
