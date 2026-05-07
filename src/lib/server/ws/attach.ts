@@ -32,6 +32,33 @@ import type { Duplex } from 'node:stream';
 
 const WS_PATH = '/ws';
 
+/* ---- process-wide state for outbound broadcasts ---- */
+
+/**
+ * Reference to the active server, kept so that REST handlers can push
+ * state-changed events to all connected clients without going through
+ * a per-request hook. Set by attachWebSocketServer; cleared on close.
+ *
+ * Stored on globalThis because Vite's plugin host and the SvelteKit
+ * SSR module graph load this file as separate module instances in
+ * dev (different specifiers, different graphs). Module-scope state
+ * therefore appears twice and the route-side handlers would never
+ * see the WebSocketServer the dev plugin attached.
+ *
+ * The globalThis singleton is process-wide — always one. In the
+ * production server.js path, the SvelteKit handler and the WS
+ * attach run in one shared module graph anyway; the global is just
+ * never observed to differ from a module-local. Net cost: a key on
+ * globalThis. Net benefit: dev and prod agree.
+ */
+const WSS_KEY = '__finn_active_wss__';
+function getActiveWss(): WebSocketServer | null {
+	return (globalThis as Record<string, unknown>)[WSS_KEY] as WebSocketServer | null ?? null;
+}
+function setActiveWss(wss: WebSocketServer | null): void {
+	(globalThis as Record<string, unknown>)[WSS_KEY] = wss;
+}
+
 /* ---- inbound ---- */
 
 export type FinnInbound =
@@ -83,10 +110,21 @@ export type BroadcastSystem = {
 	body: string;
 };
 
+export type BroadcastStateChanged = {
+	type: 'state_changed';
+	entity: 'channel' | 'agent' | 'channel_member';
+	action: 'created' | 'updated' | 'deleted';
+	/** primary key of the affected row. For channel_member, this is
+	 * the channel id; the affected agent is in `extra.agent_id`. */
+	id: string;
+	extra?: Record<string, string | number | boolean | null>;
+};
+
 export type FinnOutbound =
 	| BroadcastMessage
 	| BroadcastApprovalCreated
 	| BroadcastApprovalUpdated
+	| BroadcastStateChanged
 	| BroadcastSystem
 	| { type: 'pong' };
 
@@ -202,7 +240,31 @@ export function attachWebSocketServer(httpServer: UpgradableHttpServer, hooks: F
 	});
 
 	attached = wss;
+	setActiveWss(wss);
 	return wss;
+}
+
+/**
+ * Broadcast a state-change event from outside the WS hook path
+ * (e.g. from a REST handler). Silently no-ops if no WS server is
+ * attached, so unit tests / scripts that exercise the same code
+ * paths don't crash.
+ */
+export function broadcastStateChange(event: BroadcastStateChanged): void {
+	const wss = getActiveWss();
+	if (!wss) return;
+	broadcast(wss, event);
+}
+
+/**
+ * Broadcast any outbound event from outside the WS hook path. Used by
+ * REST handlers that need to surface a chat message (e.g. system
+ * messages on membership changes) live to all connected clients.
+ */
+export function broadcastEvent(event: FinnOutbound): void {
+	const wss = getActiveWss();
+	if (!wss) return;
+	broadcast(wss, event);
 }
 
 function send(ws: WebSocket, msg: FinnOutbound): void {
