@@ -20,7 +20,9 @@ docs/
     ├── 0003-id-formats.md
     ├── 0004-message-persistence.md
     ├── 0005-approval-flow.md
-    └── 0006-pr-only-after-showcase.md
+    ├── 0006-pr-only-after-showcase.md
+    ├── 0007-crud-ui-architecture.md
+    └── 0008-globalthis-singleton-for-vite-ws-bridge.md
 ```
 
 ## Decisions (ADRs)
@@ -41,14 +43,16 @@ across the project (not per-area).
 
 ### Index
 
-| #    | Title                                          | Topic                                                   |
-| ---- | ---------------------------------------------- | ------------------------------------------------------- |
-| 0001 | OpenClaw connector authentication and scope    | how finn talks to a Gateway, what scopes it requests    |
-| 0002 | Session-key format on the OpenClaw connector   | per-channel agent-session continuity                    |
-| 0003 | ID formats for entities                        | prefixed nanoid-12 across all primary keys              |
-| 0004 | Append-only messages, soft-delete elsewhere    | which tables get DELETE, which get `deleted_at`, which neither |
-| 0005 | Approval flow for cross-agent traffic          | when approvals trigger, sender experience, UI placement |
-| 0006 | PR-only workflow after first end-to-end showcase | when direct push stops, what PRs look like            |
+| #    | Title                                                  | Topic                                                                   |
+| ---- | ------------------------------------------------------ | ----------------------------------------------------------------------- |
+| 0001 | OpenClaw connector authentication and scope            | how finn talks to a Gateway, what scopes it requests                    |
+| 0002 | Session-key format on the OpenClaw connector           | per-channel agent-session continuity                                    |
+| 0003 | ID formats for entities                                | prefixed nanoid-12 across all primary keys                              |
+| 0004 | Append-only messages, soft-delete elsewhere            | which tables get DELETE, which get `deleted_at`, which neither          |
+| 0005 | Approval flow for cross-agent traffic                  | when approvals trigger, sender experience, UI placement                 |
+| 0006 | PR-only workflow after first end-to-end showcase       | when direct push stops, what PRs look like                              |
+| 0007 | CRUD UI architecture                                   | modal vs route, hardcoded vs schema-driven forms, REST vs WS for writes |
+| 0008 | `globalThis` singleton for the active WebSocket server | dev-mode module-instance trap and the smallest fix                      |
 
 ## Setup guides
 

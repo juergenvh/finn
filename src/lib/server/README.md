@@ -27,6 +27,24 @@ one rewrites the source.
   reads from a route) can also go here, but is reached through Vite's
   resolution (`$lib/server/...`).
 
+### Exception: `ws/dev-plugin.ts`
+
+One file in this tree intentionally breaks the `.ts`-extension import
+convention: `ws/dev-plugin.ts`. It is a Vite plugin loaded by
+`vite.config.ts`'s plugin host, **not** by the production server, and
+it must use the same module specifiers (no explicit extensions, plus
+`$lib`-style aliases for non-relative paths) as SvelteKit route
+handlers so that Vite resolves both into the same module instance.
+
+Mixing the two extension styles inside the same file would be
+inconsistent; the file is therefore explicitly excluded from the
+`tsconfig.server.json` build, which compiles only what production
+actually consumes.
+
+If you find yourself wanting to import from `ws/dev-plugin.ts` in
+a non-Vite context, that is a structural smell — the file is
+Vite-only by design. ADR-0008 explains why.
+
 ## Adding a new module
 
 If you add a new `.ts` file under `src/lib/server/`, it is automatically

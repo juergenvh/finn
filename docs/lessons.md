@@ -188,3 +188,57 @@ script.
 
 **Meta:** Operator surprise, not a bug. Worth writing down because
 the failure looks like the server is broken when it is not.
+
+---
+
+## 6. Vite duplicates module instances between plugin host and SSR graph — 2026-05-07
+
+While wiring CRUD endpoints, REST handlers needed to push WS
+`state_changed` events live to all connected browsers. The first
+implementation kept the active `WebSocketServer` in module scope
+inside `src/lib/server/ws/attach.ts` — obvious place, would work
+in every other Node app I have written.
+
+It didn't work in dev. Live broadcasts silently no-op'd.
+
+**Symptom:** Manual REST POST against the dev server returned
+`201 Created`, the DB had the row, but a connected WebSocket
+client saw zero events. No errors in the server log. No errors
+in the client console. Just nothing.
+
+**Root cause:** Vite has two module-resolution contexts in dev:
+
+1. Vite's plugin host loads `dev-plugin.ts`, which calls
+   `attachWebSocketServer()`. From here, the plugin host has
+   its own copy of `attach.ts`'s module state (including
+   `activeWss`).
+2. SvelteKit's SSR graph loads the route handlers under
+   `src/routes/api/.../+server.ts`. They import the same
+   `attach.ts`, but **a different copy** with its own
+   `activeWss = null`.
+
+The REST handlers were calling `broadcastStateChange()` on the
+SSR-side copy, where `activeWss` was permanently null. The
+broadcast hit the no-op guard and returned silently.
+
+Production never has this problem because `server.js` collapses
+everything into one shared module graph.
+
+**Fix:** Park the reference on `globalThis` (process-wide,
+shared across both module graphs). Six lines, fully documented
+in `attach.ts` and ADR-0008.
+
+**Meta:** I tried unifying the import specifiers between
+`dev-plugin.ts` and the route handlers first — my first
+hypothesis was that Vite resolution could be tricked into one
+cache entry. Wrong; the dual cache is a property of the host,
+not of the path.
+
+The lesson is broader than the fix: **dev-mode and prod-mode
+module graphs are not the same thing.** When a file is loaded
+through multiple resolver paths in dev, module-scope state
+should be assumed to be plural unless proven otherwise. This
+applies to any bundler with a plugin system (Vite, esbuild,
+Rollup, webpack), not just Vite. If a piece of state genuinely
+must be shared across loader contexts, `globalThis` is the
+right tool, not module scope.

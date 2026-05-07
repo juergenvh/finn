@@ -9,11 +9,14 @@ and a human routing every cross-agent message by hand. Named after
 Gibson's Finn — the fixer who routes between the living and the
 ROM-stored dead.
 
-**Status:** working spike. Single- and two-machine setups verified
-end-to-end. Core capabilities — persistent channels, streaming WS
-chat, OpenClaw connector, approval flow for cross-agent traffic — are
-in place. CRUD UI, real Anthropic connector, markdown export, and
-launchd integration are tracked as roadmap; see §"Roadmap".
+**Status:** working spike, with day-to-day usable surface area.
+Single- and two-machine setups verified end-to-end. Core
+capabilities — persistent channels, streaming WS chat, OpenClaw
+connector, approval flow for cross-agent traffic, in-browser CRUD
+for channels and agents — are in place. Real Anthropic connector,
+log/transcript surface, mention autocomplete, markdown rendering
+and markdown export, token-streaming, and launchd integration are
+tracked as open issues; see §"Roadmap".
 
 ## What it is
 
@@ -48,52 +51,64 @@ user's job, mediated by the UI.
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Browser  ──── HTTP + WebSocket ────▶  finn (SvelteKit + Node)  │
-│  +page.svelte                          src/routes/             │
-│  MessageBubble.svelte                  src/lib/                │
-└─────────────────────────────────────────────────────────────────┘
-                                                  │
-                              ┌───────────────────┼───────────────────┐
-                              │                   │                   │
-                              ▼                   ▼                   ▼
-                        ┌───────────┐      ┌───────────┐       ┌────────────┐
-                        │  attach.ts │      │  hooks    │       │  REST API  │
-                        │  WS server │◀────▶│  user_msg │       │  channels, │
-                        │            │ emit │  approval │       │  members,  │
-                        │            │      │  decide   │       │  messages, │
-                        │            │      └─────┬─────┘       │  approvals │
-                        └───────────┘            │             └────────────┘
-                                                 │
-                                                 ▼
-                              ┌──────────────────────────────────┐
-                              │     core engine                   │
-                              │  • messages.ts (append-only)      │
-                              │  • approvals.ts (state machine)   │
-                              │  • mentions.ts (@-parser)         │
-                              │  • connectors/registry.ts         │
-                              └─────────────────┬────────────────┘
-                                                │
-                              ┌─────────────────┴───────────────┐
-                              │     connectors                   │
-                              │  • openclaw.ts  (OpenAI HTTP API)│
-                              │  • anthropic-stub.ts            │
-                              │  • (future) anthropic, wintermute│
-                              └─────────────────┬───────────────┘
-                                                │
-                              ┌─────────────────┴───────────────┐
-                              │     agent endpoints (HTTP)       │
-                              │  • OpenClaw Gateway              │
-                              │  • Anthropic API                 │
-                              │  • Wintermute, ...               │
-                              └─────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│  Browser                                                            │
+│   src/routes/+page.svelte                                           │
+│   src/lib/ui/{MessageBubble, Modal, ChannelForm, AgentForm}.svelte  │
+└──────────────────┬──────────────────────────────────────────────────┘
+                   │
+                   │  HTTP REST                  WebSocket /ws
+                   │   GET/POST/PATCH/DELETE      • chat events
+                   │   /api/channels, /api/agents • approval events
+                   │                              • state_changed events
+                   ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  finn server (SvelteKit + Node)                                    │
+│                                                                    │
+│   ┌───────────────────┐  ┌────────────────┐  ┌───────────────────┐ │
+│   │  src/routes/api/  │  │  attach.ts     │  │  hooks (per turn) │ │
+│   │  REST writes      │◀─│  WS broadcast  │◀─│  user_message     │ │
+│   │  zod validation   │  │  globalThis    │  │  approval_decide  │ │
+│   └─────────┬─────────┘  └────────────────┘  └─────────┬─────────┘ │
+│             │                                          │           │
+│             ▼                                          ▼           │
+│   ┌──────────────────────────────────────────────────────────────┐ │
+│   │  core engine                                                 │ │
+│   │   • messages.ts        append-only writers                   │ │
+│   │   • approvals.ts       state machine                         │ │
+│   │   • mentions.ts        @-parser, channel-scoped resolve      │ │
+│   │   • channel-agent.ts   per-channel agent lookup              │ │
+│   │   • connectors/registry.ts                                   │ │
+│   └─────────────────────────────┬────────────────────────────────┘ │
+│                                 │                                  │
+│   ┌─────────────────────────────┴────────────────────────────────┐ │
+│   │  connectors                                                  │ │
+│   │   • openclaw.ts          OpenAI-compatible HTTP API          │ │
+│   │   • anthropic-stub.ts    canned replies, dev/test            │ │
+│   │   • (planned) anthropic.ts, wintermute.ts                    │ │
+│   └─────────────────────────────┬────────────────────────────────┘ │
+│                                 │                                  │
+│   ┌─────────────────────────────┴────────────────────────────────┐ │
+│   │  persistence                                                 │ │
+│   │   • db/{schema, client, ids, agent-config}.ts                │ │
+│   │   • SQLite via Drizzle ORM   →  ~/finn-data/finn.db          │ │
+│   └──────────────────────────────────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  agent endpoints (out-of-process, HTTP)                            │
+│   • OpenClaw Gateway        scoped operator headers (ADR-0001)     │
+│   • Anthropic API           planned                                │
+│   • Wintermute, ...         planned                                │
+└────────────────────────────────────────────────────────────────────┘
 
-┌─────────────────────────────────────────────────────────────────┐
-│  ~/finn-data/                                                    │
-│    finn.db                  ← SQLite (Drizzle ORM)               │
-│    secrets/.env             ← bearer tokens; chmod 600           │
-│    exports/                 ← markdown channel exports (planned) │
-└─────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  ~/finn-data/                                                      │
+│    finn.db                 SQLite database (managed by Drizzle)    │
+│    secrets/.env            bearer tokens; chmod 600                │
+│    exports/                markdown channel exports (planned)      │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Stack
@@ -202,7 +217,9 @@ wire protocol: [`docs/decisions/0005-approval-flow.md`](docs/decisions/0005-appr
 Mentions are convenience for pre-filling the target picker. The
 user's choice in the approval UI is what actually routes.
 
-## Wire protocol (WebSocket, `/ws`)
+## Wire protocol
+
+### WebSocket (`/ws`)
 
 Inbound (client → server):
 
@@ -219,14 +236,50 @@ Outbound (server → client, streamed via per-event broadcast):
 { type: 'message',           channel_id, sender, sender_id, body, ts, id }
 { type: 'approval_created',  approval, message_id }
 { type: 'approval_updated',  approval }
+{ type: 'state_changed',     entity: 'channel'|'agent'|'channel_member',
+                              action: 'created'|'updated'|'deleted',
+                              id, extra? }
 { type: 'system',            body }
 { type: 'pong' }
 ```
 
 `message` events arrive as soon as each one is persisted, so the
 user's own bubble appears in milliseconds; agent replies arrive
-when their connector returns. See `src/lib/server/ws/attach.ts` for
-the canonical schema.
+when their connector returns. `state_changed` notifies connected
+clients of CRUD changes (a channel renamed in one tab is reflected
+in another within a roundtrip). See `src/lib/server/ws/attach.ts`
+for the canonical schema.
+
+### REST API (`/api`)
+
+Read:
+
+```
+GET    /api/channels                              list active channels
+GET    /api/channels/:id/messages                 message history
+GET    /api/channels/:id/members                  channel members
+GET    /api/channels/:id/approvals                approval state hydration
+GET    /api/agents                                list active agents
+                                                  (?include_archived=1)
+GET    /api/agents/:id                            single (with parsed config)
+```
+
+Write (all bodies validated by zod; all writes also broadcast a
+`state_changed` WS event):
+
+```
+POST   /api/channels                              create
+PATCH  /api/channels/:id                          rename / re-describe
+DELETE /api/channels/:id                          soft-delete (Archive)
+POST   /api/channels/:id/members                  add member
+DELETE /api/channels/:id/members/:agentId         remove member
+POST   /api/agents                                create
+PATCH  /api/agents/:id                            name / enabled / config
+DELETE /api/agents/:id                            soft-delete (Archive)
+```
+
+`connector_type` is locked at agent creation; PATCH ignores any
+attempt to change it (ADR-0007 §"Decision 3").
 
 ## Capabilities (working today)
 
@@ -240,9 +293,11 @@ In ascending order of integration weight:
 3. **Multi-agent channel** ✓ — user, OpenClaw, and stub-Anthropic
    in one room. `@-mentions`, targeted approval, recursive approval
    for relayed replies that mention yet another agent.
-4. **Agent-config CRUD UI** — *not yet*. Today: edit the DB or
-   re-seed.
-5. **Markdown export** — *not yet*. Today: query SQLite directly.
+4. **Channel + agent CRUD UI** ✓ — in-browser create / edit /
+   disable / archive via modal forms. Live cross-tab sync via
+   `state_changed` WS events. ADR-0007.
+5. **Markdown export** — *not yet*. Today: query SQLite directly,
+   tracked as part of the log/transcript surface (issue #2).
 
 ## What this is **not** doing
 
@@ -343,18 +398,25 @@ migration sketch:
 
 ## Roadmap
 
-Tracked rough-order:
+Tracked as open GitHub issues:
+
+* **#2** Log/transcript surface — browse, search, mark, export.
+  Next-up after CRUD.
+* **#4** Mention autocomplete in the message composer.
+* **#1** Discovery: rich-rendering for message bubbles
+  (Markdown? something else?).
+* **#3** Discovery: token-streaming for assistant replies.
+* **#6** Discovery: where session memory lives
+  (finn ↔ agent ↔ user).
+
+Other known work, not yet ticketed:
 
 * Real Anthropic connector (replaces the stub).
-* Channel + agent CRUD UI (today: SQL).
-* Markdown export to `~/finn-data/exports/`.
-* Token-streaming for assistant replies.
 * Approval-recovery on server restart while a row is `approved`.
-* Cross-channel search and log viewer.
 * Tests (unit + integration; current debt).
-* launchd plist for `npm run start` once the spike stabilises.
+* `launchd` plist for `npm run start` once the spike stabilises.
 * OpenClaw gateway auth-mode migration to `trusted-proxy` for
-  cross-machine deployments (see ADR-0001).
+  cross-machine deployments (see ADR-0001 addendum).
 
 ## Documentation
 
