@@ -80,13 +80,28 @@ async function ensureMember(channelId: string, agentId: string): Promise<void> {
 	console.log(`seed: added agent ${agentId} to channel ${channelId}`);
 }
 
+/**
+ * Seed defaults can be overridden via env vars at seed time. Useful
+ * when finn runs on a different machine than the OpenClaw gateway
+ * (e.g. finn on the Mac host, gateway in a UTM VM at 192.168.64.2).
+ *
+ * After the seed has run, the dixie agent's base_url is committed in
+ * the DB and will not change on subsequent re-runs (the seed is
+ * idempotent on the `agents.name` key). To change it after seeding,
+ * use the upcoming agent-config CRUD UI, or update the row directly:
+ *   sqlite3 ~/finn-data/finn.db \
+ *     "UPDATE agents SET config = json_set(config, '$.base_url', '<new-url>') WHERE name = 'dixie';"
+ */
+const SEED_OPENCLAW_BASE_URL =
+	process.env.FINN_OPENCLAW_BASE_URL ?? 'http://127.0.0.1:18789/v1';
+
 async function main(): Promise<void> {
 	const dixieId = await ensureAgent({
 		name: 'dixie',
 		connectorType: 'openclaw',
 		configJson: serializeAgentConfig({
 			connector_type: 'openclaw',
-			base_url: 'http://127.0.0.1:18789/v1',
+			base_url: SEED_OPENCLAW_BASE_URL,
 			token_env_var: 'FINN_OPENCLAW_API_KEY',
 			model: 'openclaw'
 		})

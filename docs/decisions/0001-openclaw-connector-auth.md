@@ -189,6 +189,51 @@ removed.
   to reconfigure the gateway, that flow happens out-of-band (you
   go to the OpenClaw TUI), not through the chat-completion path.
 
+## Addendum 2026-05-07: cross-machine deployment realised
+
+When finn moved off the same host as the OpenClaw gateway (finn on
+Mac, gateway in a UTM VM on `192.168.64.2`), the transitional
+posture became operationally relevant rather than theoretical.
+
+What changed in practice:
+
+- The gateway's `bind` switched from `loopback` to `lan` so the Mac
+  host can reach `:18789`. Auth mode stayed `token` (still
+  Option A's posture).
+- The trust boundary is no longer "this host" but "the UTM Shared
+  Network between this Mac and this VM." That boundary is private
+  to the host (other LAN devices cannot route into the UTM
+  network), so it remains a single-trust-domain story — but it is
+  one step closer to being a real network than loopback was.
+- The bearer token now lives in **two** places: the original
+  `~/.openclaw/openclaw.json` on the VM, and a copy on the Mac at
+  `~/finn-data/secrets/.env`. Both must stay in sync. Token rotation
+  is now a two-host operation.
+
+**This makes the Option B migration more urgent, not less.** As
+long as auth.mode=`token`, the same shared secret on both ends
+means any process on either host that reads the token has full
+operator rights on the gateway. Trusted-proxy mode would let the
+Mac authenticate as a network identity (Mac has UTM-bridge IP
+`192.168.64.1`, VM accepts traffic from that source as identified)
+and finn would only need scope-narrowed credentials.
+
+Migration sketch (when we tackle it):
+
+1. Test `gateway.auth.mode = "trusted-proxy"` with
+   `trustedProxies: ["192.168.64.1"]` and verify the existing TUI
+   and openclaw-control-ui clients still work.
+2. finn's already-correct `x-openclaw-scopes` header begins to
+   enforce; verify with a `chat/completions` call that lacks the
+   header (should fall back to default operator) and one that has
+   it (should be scope-limited).
+3. Remove the bearer token from `~/finn-data/secrets/.env` on the
+   Mac. finn becomes secret-less for OpenClaw access.
+
+Until this migration runs, the Mac instance shares the same trust
+posture as a local TUI — acceptable for single-user, becomes
+important if a second person ever uses this Mac.
+
 ## Follow-ups (not part of this ADR)
 
 - ADR-NN: gateway auth-mode migration plan (per-gateway).

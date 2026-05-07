@@ -208,10 +208,18 @@ Container mounts:
 The repo never touches `~/finn-data`. Database file stays out of the
 repo. Secrets stay out of the repo. Exports stay out of the repo.
 
-## Local setup
+## Setup
 
-A full setup walkthrough lives in [`docs/setup.md`](docs/setup.md).
-TL;DR for a fresh checkout:
+Two full setup guides, depending on where the OpenClaw gateway runs:
+
+- **[`docs/setup.md`](docs/setup.md)** — finn and gateway on the
+  same host (single-machine). Simpler trust posture; loopback-only.
+- **[`docs/setup-mac.md`](docs/setup-mac.md)** — finn on macOS,
+  gateway in a UTM VM (two-machine). Adds a network path between
+  the two. This is the deployment that needs the trust-mode
+  migration documented in ADR-0001 §"Addendum 2026-05-07".
+
+TL;DR for the single-machine variant:
 
 ```bash
 npm install
