@@ -745,6 +745,8 @@
 			<span class="status" class:on={connected}>{connected ? '●' : '○'}</span>
 		</div>
 
+		<a class="nav-link" href="/protocol">☰ Protocol viewer</a>
+
 		<div class="section">
 			<div class="section-header">
 				<span class="section-title">channels</span>
@@ -1018,6 +1020,21 @@
 	.status.on {
 		color: #6ee7b7;
 	}
+	.nav-link {
+		display: block;
+		color: #94a3b8;
+		text-decoration: none;
+		padding: 0.4rem 0.5rem;
+		border-radius: 4px;
+		font-size: 0.9rem;
+		margin-bottom: 0.5rem;
+		transition: background 120ms;
+	}
+	.nav-link:hover {
+		background: #1f1f24;
+		color: #e8e8ea;
+	}
+
 	.section {
 		display: flex;
 		flex-direction: column;
