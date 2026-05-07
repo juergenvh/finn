@@ -82,13 +82,15 @@
 		class:status-routed={statusBadge === 'routed'}
 		class:status-rejected={statusBadge === 'rejected'}
 	>
-		<div class="header">
-			<span class="who">{senderName}</span>
-			<span class="ts">{fmtTs(ts)}</span>
-			{#if statusBadge}
-				<span class="badge {statusBadge}">{statusBadge}</span>
-			{/if}
-		</div>
+		{#if sender !== 'system'}
+			<div class="header">
+				<span class="who">{senderName}</span>
+				<span class="ts">{fmtTs(ts)}</span>
+				{#if statusBadge}
+					<span class="badge {statusBadge}">{statusBadge}</span>
+				{/if}
+			</div>
+		{/if}
 
 		<div class="body">{body}</div>
 
@@ -198,7 +200,9 @@
 		display: flex;
 		align-items: baseline;
 		gap: 0.5rem;
-		margin-bottom: 0.25rem;
+		padding-bottom: 0.35rem;
+		margin-bottom: 0.4rem;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 		font-size: 0.8rem;
 	}
 	.who {
