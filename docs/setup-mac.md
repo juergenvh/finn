@@ -186,6 +186,27 @@ different location and the two are unrelated.
 
 ## 6. Seed initial data
 
+> ⚠️ **Order matters here.** The seed reads
+> `FINN_OPENCLAW_BASE_URL` from your environment **only at the time
+> the agent row is first inserted**. If you run `npm run db:seed`
+> before step 4 (env file in place) or in a shell that does not
+> have the env loaded, the seed writes the loopback default into
+> the DB and finn will try to reach a non-existent local gateway.
+>
+> If you have already seeded with the wrong URL, the symptom is a
+> `connector error: fetch failed` system message in the chat. Fix
+> with:
+>
+> ```bash
+> sqlite3 ~/finn-data/finn.db \
+>   "UPDATE agents
+>    SET config = json_set(config, '\$.base_url', 'http://192.168.64.2:18789/v1')
+>    WHERE name = 'dixie';"
+> ```
+>
+> No finn restart is needed — the connector reads the agent config
+> from the DB on every call.
+
 ```bash
 npm run db:seed
 ```
@@ -196,15 +217,18 @@ into its config, pointing at the VM gateway.
 
 The seed is **idempotent**: re-running it does not duplicate rows.
 But once a row exists, its `config` is not re-written by the seed
-on later runs. To change the base URL after the fact, edit it in
-the DB directly:
+on later runs — the URL you write at first insert is the URL that
+stays in the DB. To change it later, use the SQL above (or wait
+for the agent-config CRUD UI on the roadmap).
+
+Verify the seeded URL after running:
 
 ```bash
 sqlite3 ~/finn-data/finn.db \
-  "UPDATE agents
-   SET config = json_set(config, '\$.base_url', 'http://192.168.64.5:18789/v1')
-   WHERE name = 'dixie';"
+  "SELECT name, json_extract(config, '\$.base_url') FROM agents;"
 ```
+
+The `dixie` row should show your VM URL, not loopback.
 
 ## 7. Run finn (foreground)
 

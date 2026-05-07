@@ -93,6 +93,23 @@ The migration creates the schema; the seed creates two agents
 channels (`spike` 1:1 with dixie, `salon` multi-agent with both).
 
 The seed is **idempotent** — re-running it does not duplicate rows.
+It is also **first-write-wins** for the `dixie` agent's config: the
+row's `base_url` is fixed at first insert. If you ever need to
+point `dixie` at a different gateway, edit the row directly:
+
+```bash
+sqlite3 ~/finn-data/finn.db \
+  "UPDATE agents
+   SET config = json_set(config, '\$.base_url', '<new-url>')
+   WHERE name = 'dixie';"
+```
+
+Verify the seeded config:
+
+```bash
+sqlite3 ~/finn-data/finn.db \
+  "SELECT name, json_extract(config, '\$.base_url') FROM agents;"
+```
 
 ## 5. Run finn
 
