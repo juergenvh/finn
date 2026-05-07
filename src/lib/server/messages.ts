@@ -140,6 +140,72 @@ export function recentMessages(
 }
 
 /**
+ * Fetch the *recent* slice that fits in a kilobyte budget (issue #13).
+ *
+ * Used by the channel-view initial load: instead of dumping the full
+ * history (or the last 200 messages, whichever is smaller), we cap on
+ * cumulative body size so a chatty channel doesn't drown the user in
+ * scroll while a quiet channel still shows enough context.
+ *
+ * Algorithm:
+ *   1. Pull the most-recent rows from the DB ordered descending by
+ *      created_at (filtered by visibility scope as usual).
+ *   2. Walk newest-to-oldest, accumulating `length(body)`. Stop when
+ *      adding the next row would exceed the budget.
+ *   3. If the very first (newest) row alone already exceeds the
+ *      budget, include it anyway — the user wants *some* messages,
+ *      not zero.
+ *   4. Return the kept slice in ascending order, mirroring
+ *      `recentMessages`.
+ *
+ * `hardLimit` is a sanity cap on how many rows we ever inspect, so a
+ * pathologically tiny budget on a giant channel doesn't pull a million
+ * rows just to throw most of them away. 5000 is plenty for anything
+ * a chat UI realistically opens.
+ */
+export function recentMessagesByBudget(
+	channelId: string,
+	budgetBytes: number,
+	scope: Scope = 'channel',
+	hardLimit = 5000
+): { rows: Message[]; hasMore: boolean } {
+	const db = getDb();
+
+	const conditions = [eq(messages.channelId, channelId)];
+	const vis = visibilityClause(scope);
+	if (vis) conditions.push(vis);
+	const whereClause =
+		conditions.length === 1 ? conditions[0]! : and(...conditions);
+
+	const all = db
+		.select()
+		.from(messages)
+		.where(whereClause)
+		.orderBy(desc(messages.createdAt))
+		.limit(hardLimit)
+		.all();
+
+	const kept: Message[] = [];
+	let acc = 0;
+	for (const row of all) {
+		const size = row.body.length;
+		if (kept.length === 0) {
+			// Always include at least one message (rule 3).
+			kept.push(row);
+			acc += size;
+			continue;
+		}
+		if (acc + size > budgetBytes) break;
+		kept.push(row);
+		acc += size;
+	}
+
+	const hasMore = kept.length < all.length || all.length === hardLimit;
+	kept.reverse();
+	return { rows: kept, hasMore };
+}
+
+/**
  * Substring search inside a single channel.
  *
  * v1: plain SQLite LIKE, case-insensitive (SQLite LIKE is case-

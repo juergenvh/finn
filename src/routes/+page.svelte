@@ -169,9 +169,24 @@
 
 	/* ---------- data fetching ---------- */
 
+	/**
+	 * Initial-load budget for a channel, in kilobytes (issue #13).
+	 * The channel view is a conversation surface, not an archive — the
+	 * full history is reachable via 'Load older' and the protocol
+	 * viewer (#14, when it lands), so the budget on first paint stays
+	 * tight enough that opening a four-month-old chat does not bury
+	 * the user in scroll.
+	 *
+	 * 200 KB is the current pragmatic middle ground; a long quiet
+	 * channel still surfaces its useful context, a chatty one stops
+	 * before becoming a wall of text. Per-channel and per-user
+	 * tuning is tracked as part of issue #18 (settings surface).
+	 */
+	const INITIAL_BUDGET_KB = 200;
+
 	async function loadChannelData(channelId: string) {
 		const [msgRes, memRes, apprRes] = await Promise.all([
-			fetch(`/api/channels/${channelId}/messages`),
+			fetch(`/api/channels/${channelId}/messages?budget=${INITIAL_BUDGET_KB}`),
 			fetch(`/api/channels/${channelId}/members`),
 			fetch(`/api/channels/${channelId}/approvals`)
 		]);
@@ -180,7 +195,10 @@
 				`channel ${channelId} fetch failed: ${msgRes.status}/${memRes.status}/${apprRes.status}`
 			);
 		}
-		const msgData = (await msgRes.json()) as { messages: DBMessage[] };
+		const msgData = (await msgRes.json()) as {
+			messages: DBMessage[];
+			has_more?: boolean;
+		};
 		const memData = (await memRes.json()) as { members: AgentInfo[] };
 		const apprData = (await apprRes.json()) as { approvals: ApprovalSnapshot[] };
 
@@ -198,11 +216,9 @@
 			...oldestLoadedTs,
 			[channelId]: ui.length > 0 ? ui[0]!.ts : Number.MAX_SAFE_INTEGER
 		};
-		// We requested 200 by default; if we got <200 there's no older
-		// data. Otherwise we don't know yet — leave reachedStart unset.
-		if (msgData.messages.length < 200) {
-			reachedStart = { ...reachedStart, [channelId]: true };
-		}
+		// Budget mode: server tells us authoritatively whether more
+		// history exists.
+		reachedStart = { ...reachedStart, [channelId]: msgData.has_more === false };
 
 		members = { ...members, [channelId]: memData.members };
 		const next = { ...approvalsByMessage };
