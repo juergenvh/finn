@@ -9,6 +9,13 @@
  *   gateways in `trusted-proxy` mode honor that, gateways in `token`
  *   mode harmlessly ignore it (transitional posture).
  *
+ * Session continuity:
+ *   See docs/decisions/0002-session-key-format.md. Each finn channel
+ *   maps to one stable OpenClaw agent session via the
+ *   `x-openclaw-session-key: finn:<channel_id>` header. Without this,
+ *   every relayed turn would land in a fresh agent session and the
+ *   agent would re-load its memory on every message.
+ *
  * Configuration via env vars (loaded from ~/finn-data/secrets/.env;
  * see docs/decisions/0001 §Token storage):
  *
@@ -19,10 +26,12 @@
  *                            the trusted-proxy migration)
  *   FINN_OPENCLAW_MODEL      default: openclaw  (= configured default agent)
  *
- * For the spike, this is stateless: each user message becomes a one-shot
- * chat-completion request. No history, no tool-use, no streaming.
- * Once the DB and channel routing are in, conversation history will live
- * server-side and be passed through on every call.
+ * For the spike, the connector is still stateless on the *finn* side:
+ *   we do not yet send conversation history in the request body. The
+ *   continuity comes from OpenClaw recognizing a returning session-key
+ *   and resuming the agent's session on the gateway side. Once finn
+ *   has its own DB, we will additionally pass message history through
+ *   for connectors that prefer client-managed history.
  */
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:18789/v1';
@@ -35,6 +44,18 @@ const DEFAULT_MODEL = 'openclaw';
  * not a code change.
  */
 const FINN_SCOPES = ['operator.read', 'operator.write'].join(' ');
+
+/**
+ * Prefix for OpenClaw session keys created by finn.
+ * MUST stay in sync with docs/decisions/0002-session-key-format.md.
+ * Changing this would orphan all existing OpenClaw-side sessions for
+ * existing finn channels.
+ */
+const FINN_SESSION_PREFIX = 'finn';
+
+function sessionKeyFor(channelId: string): string {
+	return `${FINN_SESSION_PREFIX}:${channelId}`;
+}
 
 type ChatMessage = {
 	role: 'system' | 'user' | 'assistant';
@@ -58,12 +79,17 @@ function getConfig() {
 	return { baseUrl, apiKey, model };
 }
 
-async function send(userBody: string): Promise<string> {
+export type OpenclawSendArgs = {
+	channelId: string;
+	body: string;
+};
+
+async function send(args: OpenclawSendArgs): Promise<string> {
 	const { baseUrl, apiKey, model } = getConfig();
 
 	const messages: ChatMessage[] = [
 		{ role: 'system', content: SYSTEM_PROMPT },
-		{ role: 'user', content: userBody }
+		{ role: 'user', content: args.body }
 	];
 
 	const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
@@ -73,7 +99,10 @@ async function send(userBody: string): Promise<string> {
 		// See ADR-0001. Always declare the scope, even when calling a
 		// gateway that will ignore the header — keeps the contract
 		// uniform across gateway auth modes.
-		'x-openclaw-scopes': FINN_SCOPES
+		'x-openclaw-scopes': FINN_SCOPES,
+		// See ADR-0002. Pin one OpenClaw-side session per finn channel
+		// so that the agent perceives a continuous conversation.
+		'x-openclaw-session-key': sessionKeyFor(args.channelId)
 	};
 	if (apiKey) {
 		headers.authorization = `Bearer ${apiKey}`;

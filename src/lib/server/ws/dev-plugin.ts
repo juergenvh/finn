@@ -7,8 +7,8 @@
  */
 
 import type { Plugin, ViteDevServer } from 'vite';
-import { attachWebSocketServer } from './attach';
-import { dispatchUserMessage } from '../connectors/registry';
+import { attachWebSocketServer } from './attach.ts';
+import { dispatchUserMessage } from '../connectors/registry.ts';
 
 export function finnWsDevPlugin(): Plugin {
 	return {

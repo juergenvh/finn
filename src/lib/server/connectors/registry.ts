@@ -6,7 +6,7 @@
  * routing once the DB schema is in.
  */
 
-import { openclawConnector } from './openclaw';
+import { openclawConnector } from './openclaw.ts';
 
 export type ConnectorContext = {
 	channel_id: string;
@@ -19,5 +19,5 @@ export async function dispatchUserMessage(ctx: ConnectorContext): Promise<string
 	if (ECHO) {
 		return `echo: ${ctx.body}`;
 	}
-	return openclawConnector.send(ctx.body);
+	return openclawConnector.send({ channelId: ctx.channel_id, body: ctx.body });
 }

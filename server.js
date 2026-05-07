@@ -4,21 +4,38 @@
  * Wraps the SvelteKit handler from build/handler.js in a plain node http
  * server, so we can attach the finn WebSocket server to the same port.
  *
- * Run after `npm run build`:
- *   FINN_OPENCLAW_API_KEY=... node server.js
+ * Layout:
+ *   build/                ← SvelteKit + adapter-node output
+ *     handler.js          ← exported request handler
+ *   dist-server/          ← parallel TS build of src/lib/server (see
+ *                           tsconfig.server.json), used because the WS
+ *                           layer is intentionally outside SvelteKit's
+ *                           module graph.
  *
- * TODO: the import paths below for attach/registry are *not yet verified*
- * against an actual adapter-node build output. adapter-node bundles SSR
- * code in `build/server/` but the exact filenames depend on Vite's
- * chunking. We will fix these paths after the first `npm run build` and
- * confirm the production path E2E. The dev path (vite-plugin) is the
- * authoritative spike target for today.
+ * Build:
+ *   npm run build         ← runs both `vite build` and `tsc -p tsconfig.server.json`
+ *
+ * Run:
+ *   node server.js
+ *   (loads ~/finn-data/secrets/.env automatically; PORT/HOST overridable)
  */
 
 import http from 'node:http';
-import { handler } from './build/handler.js';
-import { attachWebSocketServer } from './build/server/chunks/attach.js'; // PATH UNVERIFIED
-import { dispatchUserMessage } from './build/server/chunks/registry.js'; // PATH UNVERIFIED
+import os from 'node:os';
+import path from 'node:path';
+import dotenv from 'dotenv';
+
+// Load secrets BEFORE importing any module that reads process.env at
+// module-init time. See docs/decisions/0001 §Token storage.
+dotenv.config({
+	path: path.join(os.homedir(), 'finn-data', 'secrets', '.env'),
+	quiet: true
+});
+
+// Order: env first, SvelteKit handler second, finn server modules third.
+const { handler } = await import('./build/handler.js');
+const { attachWebSocketServer } = await import('./dist-server/ws/attach.js');
+const { dispatchUserMessage } = await import('./dist-server/connectors/registry.js');
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? '0.0.0.0';

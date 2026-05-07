@@ -16,8 +16,18 @@
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
-import type { IncomingMessage, Server as HttpServer } from 'node:http';
+import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
+
+/**
+ * Minimal HTTP-server surface we actually use. Both node:http.Server and
+ * Vite's exposed httpServer (which may be http or http2) implement these,
+ * so we widen our type to the structural intersection rather than depend
+ * on a specific concrete type.
+ */
+export interface UpgradableHttpServer {
+	on(event: 'upgrade', listener: (req: IncomingMessage, socket: Duplex, head: Buffer) => void): unknown;
+}
 
 const WS_PATH = '/ws';
 
@@ -41,7 +51,7 @@ export interface FinnHooks {
 
 let attached: WebSocketServer | null = null;
 
-export function attachWebSocketServer(httpServer: HttpServer, hooks: FinnHooks = {}): WebSocketServer {
+export function attachWebSocketServer(httpServer: UpgradableHttpServer, hooks: FinnHooks = {}): WebSocketServer {
 	if (attached) {
 		// Vite HMR can re-import this file. Re-attaching would leak handlers.
 		return attached;
