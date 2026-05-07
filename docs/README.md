@@ -3,17 +3,22 @@
 This directory holds project documentation that lives longer than a
 chat or a daily log. The top-level `README.md` is the front door; the
 files here are the source of truth for design decisions, security
-posture, and lessons learned.
+posture, setup instructions, and lessons learned.
 
 ## Structure
 
 ```
 docs/
-├── README.md            ← this file
-├── decisions/           ← Architecture Decision Records (ADRs)
-│   └── 0001-*.md
-├── trust-model.md       ← detailed security model + threat model
-└── lessons.md           ← things we got wrong and what we changed
+├── README.md              ← this file (index + when-to-write-what)
+├── setup.md               ← single-machine setup walkthrough
+├── setup-mac.md           ← Mac host + remote VM gateway walkthrough
+├── lessons.md             ← things we got wrong and what we changed
+└── decisions/             ← Architecture Decision Records (ADRs)
+    ├── 0001-openclaw-connector-auth.md
+    ├── 0002-session-key-format.md
+    ├── 0003-id-formats.md
+    ├── 0004-message-persistence.md
+    └── 0005-approval-flow.md
 ```
 
 ## Decisions (ADRs)
@@ -32,14 +37,43 @@ stays, marked superseded, so the reasoning trail survives.
 Naming: `NNNN-short-slug.md` where `NNNN` is monotonically increasing
 across the project (not per-area).
 
+### Index
+
+| #    | Title                                          | Topic                                                   |
+| ---- | ---------------------------------------------- | ------------------------------------------------------- |
+| 0001 | OpenClaw connector authentication and scope    | how finn talks to a Gateway, what scopes it requests    |
+| 0002 | Session-key format on the OpenClaw connector   | per-channel agent-session continuity                    |
+| 0003 | ID formats for entities                        | prefixed nanoid-12 across all primary keys              |
+| 0004 | Append-only messages, soft-delete elsewhere    | which tables get DELETE, which get `deleted_at`, which neither |
+| 0005 | Approval flow for cross-agent traffic          | when approvals trigger, sender experience, UI placement |
+
+## Setup guides
+
+| File                | Use when…                                              |
+| ------------------- | ------------------------------------------------------ |
+| `setup.md`          | finn and OpenClaw run on the same host                 |
+| `setup-mac.md`      | finn on macOS, OpenClaw in a UTM VM (two-machine)      |
+
+The two guides are intentionally redundant where they need to be —
+pick the one that matches your topology and follow it end to end.
+
+## Lessons
+
+`lessons.md` collects the mistakes worth remembering. Format mirrors
+`juergenvh/wintermute/LESSONS.md`: numbered, dated, with what
+happened, the symptom, the root cause, and the fix.
+
+Lessons are also append-only.
+
 ## When to write what
 
 | Kind of thing                                      | Where it goes                |
 | -------------------------------------------------- | ---------------------------- |
 | "Why did we pick X over Y?"                        | `decisions/NNNN-*.md`        |
-| "How does the auth flow actually work?"            | `trust-model.md` (or sibling) |
+| "How does the auth flow actually work?"            | the ADR is enough; if a user-facing summary is needed, link from `README.md` |
+| "How do I run this locally?"                       | `setup.md` / `setup-mac.md`  |
 | "We tried X, it broke in production, here's why"  | `lessons.md`                 |
-| "How do I run this locally?"                       | top-level `README.md`        |
+| "What is the structural convention here?"          | inline in the source file's header comment, or in a co-located README (e.g. `src/lib/server/README.md`) |
 | Daily exploration / scratch / chat log             | not in this repo             |
 
 If you find yourself explaining the same decision twice in PR bodies

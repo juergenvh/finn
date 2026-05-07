@@ -9,7 +9,9 @@
  *
  *   dispatchToAgent(agent_id, channel_id, body)
  *     Routes a single message to one specific agent. This is what
- *     the approval flow calls after a `routed` transition.
+ *     the approval flow calls during the `approved` → `routed`
+ *     transition (one call per target; the row moves to `routed`
+ *     after all calls have settled).
  *
  * Both eventually call the same per-connector `send()` implementation;
  * they only differ in how they fan out.

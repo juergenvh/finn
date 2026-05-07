@@ -89,7 +89,7 @@ export const messages = sqliteTable('messages', {
 
 /**
  * Append-only (ADR-0004). Once a row exists, its history is immutable;
- * the `status` column transitions forward (pending → approved → sent
+ * the `status` column transitions forward (pending → approved → routed
  * or pending → rejected) but the row is never deleted.
  *
  * `targetedAgentIds` is a JSON-encoded string array; per-row count is

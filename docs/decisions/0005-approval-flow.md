@@ -186,12 +186,29 @@ WebSocket inbound (client → server) gains:
 WebSocket outbound (server → client) gains:
 
 ```ts
-{ type: 'approval_created', approval: ApprovalRow, message: MessageRow }
-{ type: 'approval_updated', approval: ApprovalRow }
+{ type: 'approval_created', approval: ApprovalSnapshot, message_id: string }
+{ type: 'approval_updated', approval: ApprovalSnapshot }
 ```
+
+The `ApprovalSnapshot` includes a `targets: string[]` field that is
+pre-parsed from the row's `targeted_agent_ids` JSON column — clients
+should not need to JSON.parse anything from the wire. The full
+message row is fetched by the client via
+`GET /api/channels/:id/messages` rather than pushed inline; the WS
+event only references it by id.
 
 Existing `message` events are unchanged. A bubble's approval state
 comes from the `approvals` row attached client-side by `message_id`.
+
+**Streaming.** Server hooks emit each WS event individually as soon
+as its data is ready (per `Emit` callback in `attach.ts`), rather
+than accumulating and broadcasting all events for a turn together.
+A user message therefore appears in the UI within milliseconds of
+being sent; agent replies appear when their connectors return; an
+`approval_created` arrives between them when an agent reply mentions
+another agent. This is a wire-protocol property, not a data model
+one, but worth pinning here: the order of events in the stream is
+the order events became real on the server.
 
 ## Persistence
 
