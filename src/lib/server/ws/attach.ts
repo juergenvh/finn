@@ -14,6 +14,16 @@
  * It is also intentionally DB-agnostic. Persistence and dispatch happen
  * in the hooks supplied by the caller (see `FinnHooks`). attach.ts only
  * knows about the wire protocol.
+ *
+ * Wire protocol:
+ *   inbound  user_message     { channel_id, body }
+ *   inbound  approval_decide  { approval_id, decision, targets?, reject_reason? }
+ *   inbound  ping             {}
+ *   outbound message          { channel_id, sender, sender_id, body, ts, id }
+ *   outbound approval_created { approval, message_id }
+ *   outbound approval_updated { approval }
+ *   outbound system           { body }
+ *   outbound pong             {}
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
@@ -22,45 +32,82 @@ import type { Duplex } from 'node:stream';
 
 const WS_PATH = '/ws';
 
+/* ---- inbound ---- */
+
 export type FinnInbound =
 	| { type: 'user_message'; channel_id: string; body: string }
+	| {
+			type: 'approval_decide';
+			approval_id: string;
+			decision: 'approve' | 'reject';
+			targets?: string[];
+			reject_reason?: string;
+	  }
 	| { type: 'ping' };
 
+/* ---- outbound (broadcasts) ---- */
+
+export type ApprovalSnapshot = {
+	id: string;
+	messageId: string;
+	status: 'pending' | 'approved' | 'rejected' | 'routed';
+	targets: string[];
+	rejectReason: string | null;
+	createdAt: number;
+	decidedAt: number | null;
+};
+
+export type BroadcastMessage = {
+	type: 'message';
+	channel_id: string;
+	sender: 'user' | 'agent' | 'system';
+	sender_id: string | null;
+	body: string;
+	ts: number;
+	id: string;
+};
+
+export type BroadcastApprovalCreated = {
+	type: 'approval_created';
+	approval: ApprovalSnapshot;
+	message_id: string;
+};
+
+export type BroadcastApprovalUpdated = {
+	type: 'approval_updated';
+	approval: ApprovalSnapshot;
+};
+
+export type BroadcastSystem = {
+	type: 'system';
+	body: string;
+};
+
 export type FinnOutbound =
-	| {
-			type: 'message';
-			channel_id: string;
-			sender: 'user' | 'agent' | 'system';
-			body: string;
-			ts: number;
-			id?: string;
-	  }
-	| { type: 'system'; body: string }
+	| BroadcastMessage
+	| BroadcastApprovalCreated
+	| BroadcastApprovalUpdated
+	| BroadcastSystem
 	| { type: 'pong' };
 
-export interface FinnHooks {
-	/**
-	 * Called when a client sends a user message. The hook is responsible
-	 * for persisting the user turn, calling the appropriate connector,
-	 * persisting the agent reply, and returning the broadcast payloads.
-	 *
-	 * Returning `null`/`undefined` means "no reply" (e.g. echo-mode
-	 * disabled and no connector configured); the user message is still
-	 * broadcast.
-	 */
-	onUserMessage?: (msg: { channel_id: string; body: string }) =>
-		| Promise<UserMessageResult | null | undefined>
-		| UserMessageResult
-		| null
-		| undefined;
-}
+/* ---- hooks ---- */
 
 export type UserMessageResult = {
-	/** What to broadcast for the user's own turn. Already persisted. */
-	user: FinnOutbound & { type: 'message'; sender: 'user' };
-	/** Reply broadcast, if any. Already persisted. */
-	agent?: FinnOutbound & { type: 'message'; sender: 'agent' };
+	/** All broadcasts to fan out to clients, in order. */
+	broadcasts: Array<BroadcastMessage | BroadcastApprovalCreated | BroadcastApprovalUpdated | BroadcastSystem>;
 };
+
+export interface FinnHooks {
+	onUserMessage?: (msg: { channel_id: string; body: string }) =>
+		| Promise<UserMessageResult>
+		| UserMessageResult;
+	onApprovalDecide?: (msg: {
+		approval_id: string;
+		decision: 'approve' | 'reject';
+		targets?: string[];
+		reject_reason?: string;
+	}) => Promise<UserMessageResult> | UserMessageResult;
+}
 
 /**
  * Minimal HTTP-server surface we actually use. Both node:http.Server and
@@ -84,10 +131,7 @@ export function attachWebSocketServer(httpServer: UpgradableHttpServer, hooks: F
 
 	httpServer.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
 		const url = new URL(req.url ?? '/', 'http://localhost');
-		if (url.pathname !== WS_PATH) {
-			// Not ours. Let other listeners (Vite HMR) handle it.
-			return;
-		}
+		if (url.pathname !== WS_PATH) return;
 		wss.handleUpgrade(req, socket, head, (ws) => {
 			wss.emit('connection', ws, req);
 		});
@@ -112,7 +156,7 @@ export function attachWebSocketServer(httpServer: UpgradableHttpServer, hooks: F
 
 			if (parsed.type === 'user_message') {
 				if (!hooks.onUserMessage) {
-					send(ws, { type: 'system', body: 'no message handler configured' });
+					send(ws, { type: 'system', body: 'no user-message handler configured' });
 					return;
 				}
 				try {
@@ -120,15 +164,33 @@ export function attachWebSocketServer(httpServer: UpgradableHttpServer, hooks: F
 						channel_id: parsed.channel_id,
 						body: parsed.body
 					});
-					if (!result) return;
-					broadcast(wss, result.user);
-					if (result.agent) broadcast(wss, result.agent);
+					for (const b of result.broadcasts) broadcast(wss, b);
+				} catch (err) {
+					broadcast(wss, { type: 'system', body: `error: ${(err as Error).message}` });
+				}
+				return;
+			}
+
+			if (parsed.type === 'approval_decide') {
+				if (!hooks.onApprovalDecide) {
+					send(ws, { type: 'system', body: 'no approval-decide handler configured' });
+					return;
+				}
+				try {
+					const result = await hooks.onApprovalDecide({
+						approval_id: parsed.approval_id,
+						decision: parsed.decision,
+						targets: parsed.targets,
+						reject_reason: parsed.reject_reason
+					});
+					for (const b of result.broadcasts) broadcast(wss, b);
 				} catch (err) {
 					broadcast(wss, {
 						type: 'system',
-						body: `error: ${(err as Error).message}`
+						body: `approval error: ${(err as Error).message}`
 					});
 				}
+				return;
 			}
 		});
 	});

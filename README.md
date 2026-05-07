@@ -210,24 +210,16 @@ repo. Secrets stay out of the repo. Exports stay out of the repo.
 
 ## Local setup
 
-First-time setup on a fresh checkout:
+A full setup walkthrough lives in [`docs/setup.md`](docs/setup.md).
+TL;DR for a fresh checkout:
 
 ```bash
 npm install
-
-# Provide the OpenClaw bearer token. The file is mode 0600 and lives
-# *outside* the repo. See docs/decisions/0001 for the full trust model.
 mkdir -p ~/finn-data/secrets
-cat > ~/finn-data/secrets/.env <<EOF
-FINN_OPENCLAW_API_KEY=<your-gateway-token>
-EOF
+echo 'FINN_OPENCLAW_API_KEY=<your-gateway-token>' > ~/finn-data/secrets/.env
 chmod 600 ~/finn-data/secrets/.env
-
-# Create the database and seed the first agent + channel.
 npm run db:migrate
 npm run db:seed
-
-# Run the dev server.
 npm run dev
 ```
 

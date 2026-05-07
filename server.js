@@ -36,6 +36,7 @@ dotenv.config({
 const { handler } = await import('./build/handler.js');
 const { attachWebSocketServer } = await import('./dist-server/ws/attach.js');
 const { handleUserMessage } = await import('./dist-server/handle-user-message.js');
+const { handleApprovalDecide } = await import('./dist-server/handle-approval-decide.js');
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? '0.0.0.0';
@@ -43,7 +44,8 @@ const host = process.env.HOST ?? '0.0.0.0';
 const server = http.createServer(handler);
 
 attachWebSocketServer(server, {
-	onUserMessage: handleUserMessage
+	onUserMessage: handleUserMessage,
+	onApprovalDecide: handleApprovalDecide
 });
 
 server.listen(port, host, () => {

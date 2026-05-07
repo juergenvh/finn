@@ -32,11 +32,18 @@ export const OpenclawConfigSchema = z.object({
 
 export type OpenclawConfig = z.infer<typeof OpenclawConfigSchema>;
 
+/* ---------------------------------------------- anthropic-stub connector */
+
+import { AnthropicStubConfigSchema } from '../connectors/anthropic-stub.ts';
+export { AnthropicStubConfigSchema };
+export type { AnthropicStubConfig } from '../connectors/anthropic-stub.ts';
+
 /* -------------------------------------------------- discriminated union */
 
 /** Single connector schema. Add new connectors as additional branches. */
 export const ConnectorConfigSchema = z.discriminatedUnion('connector_type', [
-	OpenclawConfigSchema
+	OpenclawConfigSchema,
+	AnthropicStubConfigSchema
 ]);
 
 export type ConnectorConfig = z.infer<typeof ConnectorConfigSchema>;

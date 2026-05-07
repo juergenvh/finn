@@ -8,17 +8,16 @@
 import type { Plugin, ViteDevServer } from 'vite';
 import { attachWebSocketServer } from './attach.ts';
 import { handleUserMessage } from '../handle-user-message.ts';
+import { handleApprovalDecide } from '../handle-approval-decide.ts';
 
 export function finnWsDevPlugin(): Plugin {
 	return {
 		name: 'finn:ws-dev-plugin',
 		configureServer(server: ViteDevServer) {
-			if (!server.httpServer) {
-				// Vite is running in middleware-only mode; nothing to attach to.
-				return;
-			}
+			if (!server.httpServer) return;
 			attachWebSocketServer(server.httpServer, {
-				onUserMessage: handleUserMessage
+				onUserMessage: handleUserMessage,
+				onApprovalDecide: handleApprovalDecide
 			});
 		}
 	};

@@ -101,7 +101,10 @@ export const approvals = sqliteTable('approvals', {
 	messageId: text('message_id')
 		.notNull()
 		.references(() => messages.id),
-	status: text('status', { enum: ['pending', 'approved', 'rejected', 'sent'] })
+	/** Per ADR-0005, terminal-success status is `routed` (the message
+	 * has been delivered to all targets). `approved` is the transient
+	 * state between user decision and outbound completion. */
+	status: text('status', { enum: ['pending', 'approved', 'rejected', 'routed'] })
 		.notNull()
 		.default('pending'),
 	targetedAgentIds: text('targeted_agent_ids').notNull().default('[]'),
