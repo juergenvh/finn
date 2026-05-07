@@ -23,7 +23,9 @@ docs/
     ├── 0006-pr-only-after-showcase.md
     ├── 0007-crud-ui-architecture.md
     ├── 0008-globalthis-singleton-for-vite-ws-bridge.md
-    └── 0009-log-surface-v1.md
+    ├── 0009-log-surface-v1.md
+    ├── 0010-protocol-viewer.md
+    └── 0011-channel-view-kb-budget.md
 ```
 
 ## Decisions (ADRs)
@@ -55,6 +57,8 @@ across the project (not per-area).
 | 0007 | CRUD UI architecture                                   | modal vs route, hardcoded vs schema-driven forms, REST vs WS for writes |
 | 0008 | `globalThis` singleton for the active WebSocket server | dev-mode module-instance trap and the smallest fix                      |
 | 0009 | Log/transcript surface, v1 scope and shape             | pagination, search, filter, export, and mention-autocomplete choices    |
+| 0010 | Protocol viewer architecture                           | separate route, URL-state filters, cursor pagination, audit defaults    |
+| 0011 | Initial-load KB budget for the channel view            | bytes (not rows or hours), 200 KB default, when to revisit              |
 
 ## Setup guides
 

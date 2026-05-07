@@ -10,13 +10,20 @@ Gibson's Finn — the fixer who routes between the living and the
 ROM-stored dead.
 
 **Status:** working spike, with day-to-day usable surface area.
-Single- and two-machine setups verified end-to-end. Core
-capabilities — persistent channels, streaming WS chat, OpenClaw
-connector, approval flow for cross-agent traffic, in-browser CRUD
-for channels and agents, log surface (browse / search / export)
-and mention autocomplete — are in place. Real Anthropic connector,
-rich-rendering / Markdown for message bodies, token-streaming, and
-launchd integration are tracked as open issues; see §"Roadmap".
+Single- and two-machine setups verified end-to-end. The application
+is structurally split into two surfaces:
+
+- **Channel view** (`/`) — conversational. Per-channel chat with
+  KB-budgeted initial load, mention autocomplete, approval flow for
+  cross-agent traffic, in-browser CRUD for channels and agents, and
+  user-controlled grooming.
+- **Protocol viewer** (`/protocol`) — audit. Cross-channel browse,
+  search, filter, and markdown export of the full message history
+  including groomed rows.
+
+Real Anthropic connector, rich-rendering / Markdown for message
+bodies, token-streaming, settings surface, and launchd integration
+are tracked as open issues; see §"Roadmap".
 
 ## What it is
 
@@ -51,33 +58,40 @@ user's job, mediated by the UI.
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Browser                                                            │
-│   src/routes/+page.svelte                                           │
-│   src/lib/ui/{MessageBubble, Modal, ChannelForm, AgentForm}.svelte  │
-└──────────────────┬──────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  Browser                                                           │
+│   /                                                                │
+│     src/routes/+page.svelte                  ← channel view        │
+│     src/lib/ui/{MessageBubble, Modal,                              │
+│                 ChannelForm, AgentForm,                            │
+│                 MentionPopup}.svelte                               │
+│   /protocol                                                        │
+│     src/routes/protocol/+page.svelte         ← audit surface       │
+└──────────────────┬─────────────────────────────────────────────────┘
                    │
                    │  HTTP REST                  WebSocket /ws
-                   │   GET/POST/PATCH/DELETE      • chat events
-                   │   /api/channels, /api/agents • approval events
-                   │                              • state_changed events
+                   │   /api/channels, /api/agents  • chat events
+                   │   /api/messages/:id/visibility • approval events
+                   │   /api/protocol, .../export    • state_changed
                    ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │  finn server (SvelteKit + Node)                                    │
 │                                                                    │
-│   ┌───────────────────┐  ┌────────────────┐  ┌───────────────────┐ │
-│   │  src/routes/api/  │  │  attach.ts     │  │  hooks (per turn) │ │
-│   │  REST writes      │◀─│  WS broadcast  │◀─│  user_message     │ │
-│   │  zod validation   │  │  globalThis    │  │  approval_decide  │ │
-│   └─────────┬─────────┘  └────────────────┘  └─────────┬─────────┘ │
-│             │                                          │           │
-│             ▼                                          ▼           │
+│   ┌────────────────────┐  ┌────────────────┐  ┌──────────────────┐ │
+│   │  src/routes/api/   │  │  attach.ts     │  │  hooks (per turn)│ │
+│   │  REST writes       │◀─│  WS broadcast  │◀─│  user_message    │ │
+│   │  zod validation    │  │  globalThis    │  │  approval_decide │ │
+│   └─────────┬──────────┘  └────────────────┘  └─────────┬────────┘ │
+│             │                                           │          │
+│             ▼                                           ▼          │
 │   ┌──────────────────────────────────────────────────────────────┐ │
 │   │  core engine                                                 │ │
-│   │   • messages.ts        append-only writers                   │ │
+│   │   • messages.ts        append-only writers + scope=all/chan  │ │
 │   │   • approvals.ts       state machine                         │ │
 │   │   • mentions.ts        @-parser, channel-scoped resolve      │ │
 │   │   • channel-agent.ts   per-channel agent lookup              │ │
+│   │   • protocol.ts        cross-channel filter + cursor pagin.  │ │
+│   │   • export-channel.ts  per-channel + cross-channel markdown  │ │
 │   │   • connectors/registry.ts                                   │ │
 │   └─────────────────────────────┬────────────────────────────────┘ │
 │                                 │                                  │
@@ -160,7 +174,9 @@ channel_members -- which agents are in which channel
 
 messages        -- everything that's been written
   id, channel_id, sender_type (user|agent|system), sender_id,
-  body, created_at, parent_message_id   -- append-only (ADR-0004)
+  body, created_at, parent_message_id,
+  hidden_at, hidden_by          -- visibility marker (ADR-0004 addendum)
+                                -- content immutable; visibility mutable
 
 approvals       -- the human-in-the-loop step (ADR-0005)
   id, message_id,
@@ -236,12 +252,18 @@ Outbound (server → client, streamed via per-event broadcast):
 { type: 'message',           channel_id, sender, sender_id, body, ts, id }
 { type: 'approval_created',  approval, message_id }
 { type: 'approval_updated',  approval }
-{ type: 'state_changed',     entity: 'channel'|'agent'|'channel_member',
+{ type: 'state_changed',     entity: 'channel'|'agent'|'channel_member'|'message',
                               action: 'created'|'updated'|'deleted',
                               id, extra? }
 { type: 'system',            body }
 { type: 'pong' }
 ```
+
+`state_changed` events with `entity: 'message'` carry the
+channel id and the new `hidden` boolean in `extra`, so connected
+clients can update visibility without a full refetch. The
+protocol viewer at `/protocol` does not subscribe to live events
+— it is a snapshot surface (ADR-0010 §5).
 
 `message` events arrive as soon as each one is persisted, so the
 user's own bubble appears in milliseconds; agent replies arrive
@@ -257,20 +279,28 @@ Read:
 ```
 GET    /api/channels                              list active channels
 GET    /api/channels/:id/messages                 message history
-                                                  (?limit=&before=)
+                                                  (?limit=&before= | ?budget=<kb>)
 GET    /api/channels/:id/search?q=                substring search in channel
-GET    /api/channels/:id/export?format=md         markdown download
+GET    /api/channels/:id/export?format=md         single-channel markdown download
 GET    /api/channels/:id/members                  channel members
 GET    /api/channels/:id/approvals                approval state hydration
 GET    /api/agents                                list active agents
                                                   (?include_archived=1)
 GET    /api/agents/:id                            single (with parsed config)
+GET    /api/protocol                              cross-channel audit query
+                                                  (filters: channels=&q=&sender_types=&
+                                                   senders=&from=&to=&visibility=&
+                                                   only_rejected=&cursor=&limit=)
+GET    /api/protocol/export?format=md             cross-channel markdown download
+                                                  (same filter params)
 ```
 
-`messages` supports cursor-style backwards pagination via
-`before=<ms>` plus `limit`. The export endpoint sets
-`Content-Disposition: attachment` so the browser saves the file
-rather than rendering it; format is markdown only today.
+The channel `messages` endpoint has two modes: `limit`+`before` for
+'load older' pagination, or `budget=<kb>` for the KB-bounded initial
+load (ADR-0011). The protocol endpoints share the same filter
+vocabulary; pagination there is cursor-based on `(created_at, id)`
+(ADR-0010). Both export endpoints set `Content-Disposition:
+attachment` so the browser saves the file.
 
 Write (all bodies validated by zod; all writes also broadcast a
 `state_changed` WS event):
@@ -284,10 +314,16 @@ DELETE /api/channels/:id/members/:agentId         remove member
 POST   /api/agents                                create
 PATCH  /api/agents/:id                            name / enabled / config
 DELETE /api/agents/:id                            soft-delete (Archive)
+PATCH  /api/messages/:id/visibility               groom: hide / unhide
 ```
 
 `connector_type` is locked at agent creation; PATCH ignores any
 attempt to change it (ADR-0007 §"Decision 3").
+
+Message visibility is the one allowed mutation on the messages
+table. Body, sender, and timestamp remain immutable; only
+`hidden_at` and `hidden_by` flip on grooming. See ADR-0004's
+2026-05-07 addendum for the 'immutable but extendable' discipline.
 
 ## Capabilities (working today)
 
@@ -310,6 +346,18 @@ In ascending order of integration weight:
    as browser download. ADR-0009.
 6. **Mention autocomplete** ✓ — typing `@` in the composer pops
    up channel-member candidates, keyboard-navigable. ADR-0009 §5/6.
+7. **KB-budget initial load** ✓ — channel view caps cumulative
+   body size on first paint (default 200 KB). 'Load older' still
+   walks back further. ADR-0011.
+8. **Channel grooming** ✓ — hide-from-channel-view marker on each
+   message bubble; protocol viewer and exports ignore the marker
+   per audit discipline. ADR-0004 addendum.
+9. **Protocol viewer** ✓ — separate `/protocol` route. Cross-
+   channel browse with multi-channel filter, full-text search,
+   sender filter (type + specific agent), date range, visibility
+   selector, only-rejected flag, cursor-paginated, markdown export
+   of the current filter result. URL search-params are the filter
+   source-of-truth. ADR-0010.
 
 ## What this is **not** doing
 
@@ -416,18 +464,24 @@ Tracked as open GitHub issues:
   (Markdown? something else?).
 * **#3** Discovery: token-streaming for assistant replies.
 * **#6** Discovery: where session memory lives
-  (finn ↔ agent ↔ user).
+  (finn ↔ agent ↔ user) — plus the addendum on memory-storage
+  signalling from connectors.
+* **#18** Discovery: settings surface — global defaults vs
+  per-channel overrides for KB budget and other knobs.
 
-Follow-ups under the log surface (issue #2 v1 already shipped):
+Follow-ups under earlier issues:
 
-* Cross-channel search.
 * SQLite FTS5 / ranked search when LIKE feels slow.
 * Range-select mark-and-export of a channel slice.
 * Date-jumper / calendar pagination for very long channels.
-* Persisted per-user filter preferences.
+* Persisted per-user filter preferences (folds into #18).
 * Server-side `~/finn-data/exports/` write alongside the
   browser download.
-* `#channel` autocomplete.
+* `#channel` autocomplete in the composer.
+* `?channel=<id>` query-param handler at `/` so the protocol
+  viewer's channel-pill links land on the right channel.
+* Tab-switcher layout once a third audit-style surface
+  appears (ADR-0010 §1 'when to revisit').
 
 Other known work, not yet ticketed:
 
