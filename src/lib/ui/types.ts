@@ -34,6 +34,14 @@ export type ApprovalSnapshot = {
 	decidedAt: number | null;
 };
 
+export type WSStateChanged = {
+	type: 'state_changed';
+	entity: 'channel' | 'agent' | 'channel_member';
+	action: 'created' | 'updated' | 'deleted';
+	id: string;
+	extra?: Record<string, string | number | boolean | null>;
+};
+
 export type WSInbound =
 	| {
 			type: 'message';
@@ -46,5 +54,6 @@ export type WSInbound =
 	  }
 	| { type: 'approval_created'; approval: ApprovalSnapshot; message_id: string }
 	| { type: 'approval_updated'; approval: ApprovalSnapshot }
+	| WSStateChanged
 	| { type: 'system'; body: string }
 	| { type: 'pong' };
