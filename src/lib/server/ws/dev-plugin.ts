@@ -2,13 +2,12 @@
  * Vite dev-plugin: attaches the finn WebSocket server to Vite's HTTP server
  * so that ws://localhost:5173/ws works in `npm run dev`.
  *
- * Mirrors what /server.js does in production (see Step 4 of the
- * SvelteKit-WebSocket pattern).
+ * Mirrors what /server.js does in production.
  */
 
 import type { Plugin, ViteDevServer } from 'vite';
 import { attachWebSocketServer } from './attach.ts';
-import { dispatchUserMessage } from '../connectors/registry.ts';
+import { handleUserMessage } from '../handle-user-message.ts';
 
 export function finnWsDevPlugin(): Plugin {
 	return {
@@ -19,7 +18,7 @@ export function finnWsDevPlugin(): Plugin {
 				return;
 			}
 			attachWebSocketServer(server.httpServer, {
-				onUserMessage: (msg) => dispatchUserMessage(msg)
+				onUserMessage: handleUserMessage
 			});
 		}
 	};

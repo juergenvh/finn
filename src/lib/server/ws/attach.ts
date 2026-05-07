@@ -11,13 +11,56 @@
  * `http.Server`-compatible object and wires up a WebSocketServer in
  * `noServer` mode, then routes the HTTP `upgrade` event by path.
  *
- * For the spike: one global broadcast room. Channel/agent routing comes
- * once we wire the connectors and the DB.
+ * It is also intentionally DB-agnostic. Persistence and dispatch happen
+ * in the hooks supplied by the caller (see `FinnHooks`). attach.ts only
+ * knows about the wire protocol.
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
+
+const WS_PATH = '/ws';
+
+export type FinnInbound =
+	| { type: 'user_message'; channel_id: string; body: string }
+	| { type: 'ping' };
+
+export type FinnOutbound =
+	| {
+			type: 'message';
+			channel_id: string;
+			sender: 'user' | 'agent' | 'system';
+			body: string;
+			ts: number;
+			id?: string;
+	  }
+	| { type: 'system'; body: string }
+	| { type: 'pong' };
+
+export interface FinnHooks {
+	/**
+	 * Called when a client sends a user message. The hook is responsible
+	 * for persisting the user turn, calling the appropriate connector,
+	 * persisting the agent reply, and returning the broadcast payloads.
+	 *
+	 * Returning `null`/`undefined` means "no reply" (e.g. echo-mode
+	 * disabled and no connector configured); the user message is still
+	 * broadcast.
+	 */
+	onUserMessage?: (msg: { channel_id: string; body: string }) =>
+		| Promise<UserMessageResult | null | undefined>
+		| UserMessageResult
+		| null
+		| undefined;
+}
+
+export type UserMessageResult = {
+	/** What to broadcast for the user's own turn. Already persisted. */
+	user: FinnOutbound & { type: 'message'; sender: 'user' };
+	/** Reply broadcast, if any. Already persisted. */
+	agent?: FinnOutbound & { type: 'message'; sender: 'agent' };
+};
 
 /**
  * Minimal HTTP-server surface we actually use. Both node:http.Server and
@@ -27,26 +70,6 @@ import type { Duplex } from 'node:stream';
  */
 export interface UpgradableHttpServer {
 	on(event: 'upgrade', listener: (req: IncomingMessage, socket: Duplex, head: Buffer) => void): unknown;
-}
-
-const WS_PATH = '/ws';
-
-export type FinnInbound =
-	| { type: 'user_message'; channel_id: string; body: string }
-	| { type: 'ping' };
-
-export type FinnOutbound =
-	| { type: 'message'; channel_id: string; sender: 'user' | 'agent'; body: string; ts: number }
-	| { type: 'system'; body: string }
-	| { type: 'pong' };
-
-export interface FinnHooks {
-	/**
-	 * Called when a client sends a user message.
-	 * Implementation decides how/whether to dispatch to a connector.
-	 * Returning agent text (or null) lets the spike echo a reply directly.
-	 */
-	onUserMessage?: (msg: { channel_id: string; body: string }) => Promise<string | null> | string | null;
 }
 
 let attached: WebSocketServer | null = null;
@@ -88,37 +111,23 @@ export function attachWebSocketServer(httpServer: UpgradableHttpServer, hooks: F
 			}
 
 			if (parsed.type === 'user_message') {
-				// Echo the user's own message back to them so the UI doesn't have
-				// to optimistically render — single source of truth is the server.
-				broadcast(wss, {
-					type: 'message',
-					channel_id: parsed.channel_id,
-					sender: 'user',
-					body: parsed.body,
-					ts: Date.now()
-				});
-
-				if (hooks.onUserMessage) {
-					try {
-						const reply = await hooks.onUserMessage({
-							channel_id: parsed.channel_id,
-							body: parsed.body
-						});
-						if (reply !== null && reply !== undefined) {
-							broadcast(wss, {
-								type: 'message',
-								channel_id: parsed.channel_id,
-								sender: 'agent',
-								body: reply,
-								ts: Date.now()
-							});
-						}
-					} catch (err) {
-						broadcast(wss, {
-							type: 'system',
-							body: `connector error: ${(err as Error).message}`
-						});
-					}
+				if (!hooks.onUserMessage) {
+					send(ws, { type: 'system', body: 'no message handler configured' });
+					return;
+				}
+				try {
+					const result = await hooks.onUserMessage({
+						channel_id: parsed.channel_id,
+						body: parsed.body
+					});
+					if (!result) return;
+					broadcast(wss, result.user);
+					if (result.agent) broadcast(wss, result.agent);
+				} catch (err) {
+					broadcast(wss, {
+						type: 'system',
+						body: `error: ${(err as Error).message}`
+					});
 				}
 			}
 		});

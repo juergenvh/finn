@@ -35,7 +35,7 @@ dotenv.config({
 // Order: env first, SvelteKit handler second, finn server modules third.
 const { handler } = await import('./build/handler.js');
 const { attachWebSocketServer } = await import('./dist-server/ws/attach.js');
-const { dispatchUserMessage } = await import('./dist-server/connectors/registry.js');
+const { handleUserMessage } = await import('./dist-server/handle-user-message.js');
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? '0.0.0.0';
@@ -43,7 +43,7 @@ const host = process.env.HOST ?? '0.0.0.0';
 const server = http.createServer(handler);
 
 attachWebSocketServer(server, {
-	onUserMessage: (msg) => dispatchUserMessage(msg)
+	onUserMessage: handleUserMessage
 });
 
 server.listen(port, host, () => {

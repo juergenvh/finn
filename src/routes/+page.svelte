@@ -1,20 +1,74 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 
+	type ChannelInfo = { id: string; name: string; description: string | null };
+
+	type DBMessage = {
+		id: string;
+		channelId: string;
+		senderType: 'user' | 'agent' | 'system';
+		senderId: string | null;
+		body: string;
+		createdAt: number;
+	};
+
 	type IncomingMsg =
-		| { type: 'message'; channel_id: string; sender: 'user' | 'agent'; body: string; ts: number }
+		| {
+				type: 'message';
+				channel_id: string;
+				sender: 'user' | 'agent' | 'system';
+				body: string;
+				ts: number;
+				id?: string;
+		  }
 		| { type: 'system'; body: string }
 		| { type: 'pong' };
 
+	type UIMessage = {
+		key: string;
+		sender: 'user' | 'agent' | 'system';
+		body: string;
+		ts: number;
+	};
+
 	let ws: WebSocket | null = $state(null);
 	let connected = $state(false);
-	let messages: Array<{ id: number; sender: 'user' | 'agent' | 'system'; body: string; ts: number }> = $state([]);
+	let channel: ChannelInfo | null = $state(null);
+	let messages: UIMessage[] = $state([]);
 	let draft = $state('');
-	let nextId = 0;
-	const channelId = 'spike';
+	let bootstrapError: string | null = $state(null);
+	let scratchKey = 0;
 
-	function append(sender: 'user' | 'agent' | 'system', body: string, ts = Date.now()) {
-		messages = [...messages, { id: nextId++, sender, body, ts }];
+	function append(sender: 'user' | 'agent' | 'system', body: string, ts: number, key?: string) {
+		messages = [...messages, { key: key ?? `local-${++scratchKey}`, sender, body, ts }];
+	}
+
+	async function bootstrap() {
+		try {
+			const res = await fetch('/api/channels');
+			if (!res.ok) throw new Error(`/api/channels ${res.status}`);
+			const data = (await res.json()) as { channels: ChannelInfo[] };
+			if (data.channels.length === 0) {
+				bootstrapError = 'no channels in DB; run `npm run db:seed`';
+				return;
+			}
+			channel = data.channels[0]!;
+
+			const histRes = await fetch(`/api/channels/${channel.id}/messages`);
+			if (histRes.ok) {
+				const hist = (await histRes.json()) as { messages: DBMessage[] };
+				messages = hist.messages.map((m) => ({
+					key: m.id,
+					sender: m.senderType,
+					body: m.body,
+					ts: m.createdAt
+				}));
+			}
+
+			connect();
+		} catch (err) {
+			bootstrapError = (err as Error).message;
+		}
 	}
 
 	function connect() {
@@ -31,13 +85,14 @@
 			try {
 				msg = JSON.parse(ev.data);
 			} catch {
-				append('system', `[unparseable: ${ev.data}]`);
+				append('system', `[unparseable: ${ev.data}]`, Date.now());
 				return;
 			}
 			if (msg.type === 'message') {
-				append(msg.sender, msg.body, msg.ts);
+				if (!channel || msg.channel_id !== channel.id) return;
+				append(msg.sender, msg.body, msg.ts, msg.id);
 			} else if (msg.type === 'system') {
-				append('system', msg.body);
+				append('system', msg.body, Date.now());
 			}
 		};
 		ws = socket;
@@ -45,8 +100,8 @@
 
 	function send() {
 		const body = draft.trim();
-		if (!body || !ws || ws.readyState !== WebSocket.OPEN) return;
-		ws.send(JSON.stringify({ type: 'user_message', channel_id: channelId, body }));
+		if (!body || !ws || ws.readyState !== WebSocket.OPEN || !channel) return;
+		ws.send(JSON.stringify({ type: 'user_message', channel_id: channel.id, body }));
 		draft = '';
 	}
 
@@ -58,7 +113,7 @@
 	}
 
 	onMount(() => {
-		connect();
+		bootstrap();
 	});
 
 	onDestroy(() => {
@@ -69,11 +124,18 @@
 <div class="root">
 	<header>
 		<h1>finn</h1>
+		{#if channel}
+			<span class="channel">#{channel.name}</span>
+		{/if}
 		<span class="status" class:on={connected}>{connected ? 'connected' : 'disconnected'}</span>
 	</header>
 
+	{#if bootstrapError}
+		<div class="error">bootstrap failed: {bootstrapError}</div>
+	{/if}
+
 	<main>
-		{#each messages as m (m.id)}
+		{#each messages as m (m.key)}
 			<div class="msg {m.sender}">
 				<span class="who">{m.sender}</span>
 				<span class="body">{m.body}</span>
@@ -119,12 +181,23 @@
 		font-size: 1.1rem;
 		font-weight: 600;
 	}
+	.channel {
+		color: #aaa;
+		font-size: 0.95rem;
+	}
 	.status {
 		font-size: 0.75rem;
 		color: #888;
+		margin-left: auto;
 	}
 	.status.on {
 		color: #6ee7b7;
+	}
+	.error {
+		background: #3a1a1a;
+		color: #fca5a5;
+		padding: 0.5rem 1rem;
+		font-size: 0.9rem;
 	}
 	main {
 		flex: 1;

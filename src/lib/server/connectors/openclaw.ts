@@ -16,15 +16,13 @@
  *   every relayed turn would land in a fresh agent session and the
  *   agent would re-load its memory on every message.
  *
- * Configuration via env vars (loaded from ~/finn-data/secrets/.env;
- * see docs/decisions/0001 §Token storage):
- *
- *   FINN_OPENCLAW_BASE_URL   default: http://127.0.0.1:18789/v1
- *   FINN_OPENCLAW_API_KEY    bearer token for the gateway
- *                            (required while any reachable gateway runs
- *                            in `token` mode; may become optional after
- *                            the trusted-proxy migration)
- *   FINN_OPENCLAW_MODEL      default: openclaw  (= configured default agent)
+ * Configuration:
+ *   The connector receives an OpenclawConfig object (see
+ *   db/agent-config.ts) on every call. base_url and model come from the
+ *   agent's row in the DB. The bearer token is read from the env var
+ *   named in `config.token_env_var` (default `FINN_OPENCLAW_API_KEY`),
+ *   which is loaded from ~/finn-data/secrets/.env at process start.
+ *   The token never lives in the DB.
  *
  * For the spike, the connector is still stateless on the *finn* side:
  *   we do not yet send conversation history in the request body. The
@@ -34,8 +32,7 @@
  *   for connectors that prefer client-managed history.
  */
 
-const DEFAULT_BASE_URL = 'http://127.0.0.1:18789/v1';
-const DEFAULT_MODEL = 'openclaw';
+import type { OpenclawConfig } from '../db/agent-config.ts';
 
 /**
  * Scope set finn declares on every OpenClaw request.
@@ -72,20 +69,15 @@ const SYSTEM_PROMPT =
 	"You are an assistant being addressed through 'finn', a multi-agent " +
 	'chat router. Reply concisely; the user is testing channel plumbing.';
 
-function getConfig() {
-	const baseUrl = process.env.FINN_OPENCLAW_BASE_URL ?? DEFAULT_BASE_URL;
-	const apiKey = process.env.FINN_OPENCLAW_API_KEY ?? '';
-	const model = process.env.FINN_OPENCLAW_MODEL ?? DEFAULT_MODEL;
-	return { baseUrl, apiKey, model };
-}
-
 export type OpenclawSendArgs = {
 	channelId: string;
 	body: string;
+	config: OpenclawConfig;
 };
 
 async function send(args: OpenclawSendArgs): Promise<string> {
-	const { baseUrl, apiKey, model } = getConfig();
+	const { base_url: baseUrl, model, token_env_var: tokenEnvVar } = args.config;
+	const apiKey = process.env[tokenEnvVar] ?? '';
 
 	const messages: ChatMessage[] = [
 		{ role: 'system', content: SYSTEM_PROMPT },

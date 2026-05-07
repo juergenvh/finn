@@ -208,6 +208,33 @@ Container mounts:
 The repo never touches `~/finn-data`. Database file stays out of the
 repo. Secrets stay out of the repo. Exports stay out of the repo.
 
+## Local setup
+
+First-time setup on a fresh checkout:
+
+```bash
+npm install
+
+# Provide the OpenClaw bearer token. The file is mode 0600 and lives
+# *outside* the repo. See docs/decisions/0001 for the full trust model.
+mkdir -p ~/finn-data/secrets
+cat > ~/finn-data/secrets/.env <<EOF
+FINN_OPENCLAW_API_KEY=<your-gateway-token>
+EOF
+chmod 600 ~/finn-data/secrets/.env
+
+# Create the database and seed the first agent + channel.
+npm run db:migrate
+npm run db:seed
+
+# Run the dev server.
+npm run dev
+```
+
+The data volume layout (`~/finn-data/`) is described in §"Layout on
+disk" below; nothing in the repo writes to it except the migration
+and seed scripts.
+
 ## Trust model
 
 finn is a **scoped operator UI**, not a sandboxed application. It is
