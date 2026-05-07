@@ -9,7 +9,9 @@
 		approval?: ApprovalSnapshot;
 		members: AgentInfo[];
 		excludeAgentIds?: string[];
+		hidden?: boolean;
 		onDecide: (decision: 'approve' | 'reject', targets: string[], reason: string) => void;
+		onSetHidden?: (hidden: boolean) => void;
 	};
 
 	let {
@@ -20,7 +22,9 @@
 		approval,
 		members,
 		excludeAgentIds = [],
-		onDecide
+		hidden = false,
+		onDecide,
+		onSetHidden
 	}: Props = $props();
 
 	let selectedTargets = $state<Set<string>>(new Set());
@@ -81,7 +85,17 @@
 		class:status-approved={statusBadge === 'approved'}
 		class:status-routed={statusBadge === 'routed'}
 		class:status-rejected={statusBadge === 'rejected'}
+		class:hidden-msg={hidden}
 	>
+		{#if onSetHidden}
+			<button
+				class="hide-btn"
+				title={hidden ? 'unhide message' : 'hide message from this view'}
+				onclick={() => onSetHidden(!hidden)}
+			>
+				{hidden ? '↻' : '×'}
+			</button>
+		{/if}
 		{#if sender !== 'system'}
 			<div class="header">
 				<div class="header-main">
@@ -166,10 +180,39 @@
 	}
 
 	.bubble {
+		position: relative;
 		max-width: 80%;
 		padding: 0.55rem 0.75rem;
 		border-radius: 10px;
 		border-left: 3px solid transparent;
+	}
+	.bubble.hidden-msg {
+		opacity: 0.45;
+		border-left-color: #475569;
+		border-left-style: dashed;
+	}
+	.hide-btn {
+		position: absolute;
+		top: 0.25rem;
+		right: 0.35rem;
+		background: transparent;
+		border: 0;
+		color: #475569;
+		font-size: 0.95rem;
+		line-height: 1;
+		cursor: pointer;
+		padding: 0.1rem 0.35rem;
+		border-radius: 3px;
+		opacity: 0;
+		transition: opacity 120ms;
+	}
+	.bubble:hover .hide-btn,
+	.bubble.hidden-msg .hide-btn {
+		opacity: 1;
+	}
+	.hide-btn:hover {
+		color: #cbd5e1;
+		background: rgba(255, 255, 255, 0.05);
 	}
 	.bubble.user {
 		background: #1e3a5f;

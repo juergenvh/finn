@@ -22,6 +22,7 @@
 		senderId: string | null;
 		body: string;
 		ts: number;
+		hiddenAt: number | null;
 	};
 
 	/* ---------- WebSocket + bootstrap state ---------- */
@@ -85,6 +86,9 @@
 	let hiddenAgentIds = $state<Set<string>>(new Set());
 	let hideSystem = $state(false);
 	let hideRejected = $state(false);
+	/** Show messages that the user has groomed-hidden. Off by default;
+	 * groomed messages stay out of the channel view until toggled on. */
+	let showGroomed = $state(false);
 
 	/* ---------- modals + sidebar menus ---------- */
 
@@ -138,6 +142,7 @@
 		const list = baseMessages;
 		if (!searchActive) {
 			return list.filter((m) => {
+				if (m.hiddenAt !== null && !showGroomed) return false;
 				if (hideSystem && m.sender === 'system') return false;
 				if (m.sender === 'agent' && m.senderId && hiddenAgentIds.has(m.senderId)) return false;
 				if (hideRejected) {
@@ -185,6 +190,7 @@
 			sender: m.senderType,
 			senderId: m.senderId,
 			body: m.body,
+			hiddenAt: m.hiddenAt ?? null,
 			ts: m.createdAt
 		}));
 		messagesByChannel = { ...messagesByChannel, [channelId]: ui };
@@ -234,6 +240,7 @@
 			sender: m.senderType,
 			senderId: m.senderId,
 			body: m.body,
+			hiddenAt: m.hiddenAt ?? null,
 			ts: m.createdAt
 		}));
 		const existing = messagesByChannel[activeChannelId] ?? [];
@@ -328,6 +335,7 @@
 						sender: msg.sender,
 						senderId: msg.sender_id,
 						body: msg.body,
+						hiddenAt: null,
 						ts: msg.ts
 					}
 				]
@@ -355,6 +363,20 @@
 			} else if (msg.entity === 'channel_member') {
 				if (messagesByChannel[msg.id] !== undefined) {
 					await loadChannelData(msg.id);
+				}
+			} else if (msg.entity === 'message') {
+				// Visibility change. Update the in-memory record without
+				// a full reload so the bubble re-derives its filter
+				// status.
+				const channelId = (msg.extra?.channel_id as string | undefined) ?? null;
+				const hidden = (msg.extra?.hidden as boolean | undefined) ?? false;
+				if (channelId && messagesByChannel[channelId]) {
+					messagesByChannel = {
+						...messagesByChannel,
+						[channelId]: messagesByChannel[channelId]!.map((m) =>
+							m.id === msg.id ? { ...m, hiddenAt: hidden ? Date.now() : null } : m
+						)
+					};
 				}
 			}
 			return;
@@ -417,6 +439,18 @@
 		ws.send(JSON.stringify({ type: 'user_message', channel_id: activeChannelId, body }));
 		draft = '';
 		mentionCtx = null;
+	}
+
+	async function setMessageHidden(messageId: string, hidden: boolean) {
+		const res = await fetch(`/api/messages/${messageId}/visibility`, {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ hidden })
+		});
+		if (!res.ok) {
+			alert(`failed: ${res.status}`);
+		}
+		// The state_changed broadcast will update the in-memory map.
 	}
 
 	function decideApproval(
@@ -656,6 +690,7 @@
 			sender: m.senderType,
 			senderId: m.senderId,
 			body: m.body,
+			hiddenAt: m.hiddenAt ?? null,
 			ts: m.createdAt
 		}));
 	}
@@ -771,6 +806,10 @@
 					<input type="checkbox" bind:checked={hideRejected} />
 					<span class="filter-name">hide rejected approvals</span>
 				</label>
+				<label class="filter-row">
+					<input type="checkbox" bind:checked={showGroomed} />
+					<span class="filter-name">show groomed (hidden) messages</span>
+				</label>
 			</div>
 		{/if}
 	</aside>
@@ -828,11 +867,13 @@
 					approval={approvalsByMessage[m.id]}
 					members={activeMembers}
 					excludeAgentIds={m.senderId ? [m.senderId] : []}
+					hidden={m.hiddenAt !== null}
 					onDecide={(decision, targets, reason) => {
 						const approval = approvalsByMessage[m.id];
 						if (!approval) return;
 						decideApproval(approval.id, decision, targets, reason);
 					}}
+					onSetHidden={(h) => void setMessageHidden(m.id, h)}
 				/>
 			{/each}
 		</main>

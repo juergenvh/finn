@@ -5,7 +5,7 @@
  * function and no soft-delete column on this table.
  */
 
-import { eq, asc, desc, and, lt, like, or } from 'drizzle-orm';
+import { eq, asc, desc, and, lt, like, isNull } from 'drizzle-orm';
 import { getDb } from './db/client.ts';
 import { messages, type Message } from './db/schema.ts';
 import { newId } from './db/ids.ts';
@@ -37,7 +37,9 @@ export function recordUserMessage(args: RecordUserMessage): Message {
 		senderId: args.userId ?? 'jurgen',
 		body: args.body,
 		createdAt: Date.now(),
-		parentMessageId: null
+		parentMessageId: null,
+		hiddenAt: null,
+		hiddenBy: null
 	};
 	db.insert(messages).values(row).run();
 	return row;
@@ -52,7 +54,9 @@ export function recordAgentMessage(args: RecordAgentMessage): Message {
 		senderId: args.agentId,
 		body: args.body,
 		createdAt: Date.now(),
-		parentMessageId: null
+		parentMessageId: null,
+		hiddenAt: null,
+		hiddenBy: null
 	};
 	db.insert(messages).values(row).run();
 	return row;
@@ -67,10 +71,27 @@ export function recordSystemMessage(args: RecordSystemMessage): Message {
 		senderId: null,
 		body: args.body,
 		createdAt: Date.now(),
-		parentMessageId: null
+		parentMessageId: null,
+		hiddenAt: null,
+		hiddenBy: null
 	};
 	db.insert(messages).values(row).run();
 	return row;
+}
+
+/**
+ * Visibility scopes for message reads.
+ *
+ *   'channel'  — the live channel-view; filters out groomed
+ *                (hidden_at IS NOT NULL) messages.
+ *   'all'      — the protocol-viewer / export path; returns
+ *                everything regardless of grooming. ADR-0004
+ *                addendum: the audit log ignores visibility.
+ */
+export type Scope = 'channel' | 'all';
+
+function visibilityClause(scope: Scope) {
+	return scope === 'channel' ? isNull(messages.hiddenAt) : undefined;
 }
 
 /**
@@ -85,17 +106,24 @@ export function recordSystemMessage(args: RecordSystemMessage): Message {
  *
  * In both cases the slice itself is sorted ascending so the UI can
  * just append (or prepend) without reversing.
+ *
+ * `scope` defaults to 'channel' (groomed messages excluded).
+ * Callers reading the audit log should pass 'all'.
  */
 export function recentMessages(
 	channelId: string,
 	limit = 200,
-	before?: number
+	before?: number,
+	scope: Scope = 'channel'
 ): Message[] {
 	const db = getDb();
 
-	const whereClause = before
-		? and(eq(messages.channelId, channelId), lt(messages.createdAt, before))
-		: eq(messages.channelId, channelId);
+	const conditions = [eq(messages.channelId, channelId)];
+	if (before) conditions.push(lt(messages.createdAt, before));
+	const vis = visibilityClause(scope);
+	if (vis) conditions.push(vis);
+	const whereClause =
+		conditions.length === 1 ? conditions[0]! : and(...conditions);
 
 	// Pull the *most recent* `limit` rows that satisfy the filter, then
 	// reverse to ascending order in JS. (drizzle-sqlite has no
@@ -120,21 +148,66 @@ export function recentMessages(
  *
  * Returns hits ascending by createdAt, capped by `limit`. The query
  * is automatically wrapped in `%...%`; callers pass the bare term.
+ *
+ * `scope` defaults to 'channel' (groomed messages excluded). Use
+ * 'all' for the protocol-viewer surface.
  */
 export function searchMessages(
 	channelId: string,
 	query: string,
-	limit = 100
+	limit = 100,
+	scope: Scope = 'channel'
 ): Message[] {
 	const trimmed = query.trim();
 	if (trimmed.length === 0) return [];
 	const db = getDb();
 	const pattern = `%${trimmed.replace(/[%_]/g, '\\$&')}%`;
+
+	const conditions = [eq(messages.channelId, channelId), like(messages.body, pattern)];
+	const vis = visibilityClause(scope);
+	if (vis) conditions.push(vis);
+
 	return db
 		.select()
 		.from(messages)
-		.where(and(eq(messages.channelId, channelId), like(messages.body, pattern)))
+		.where(and(...conditions))
 		.orderBy(asc(messages.createdAt))
 		.limit(limit)
 		.all();
+}
+
+/**
+ * Apply a grooming decision to a message.
+ *
+ * Setting `hidden=true` records the current timestamp in
+ * `hidden_at`; setting `hidden=false` clears both `hidden_at`
+ * and `hidden_by`. Idempotent on both sides.
+ *
+ * Per ADR-0004 addendum: this is the one allowed mutation on the
+ * messages table. body and other content columns remain
+ * immutable.
+ */
+export function setMessageVisibility(
+	messageId: string,
+	hidden: boolean,
+	actor = 'jurgen'
+): Message | null {
+	const db = getDb();
+	const current = db.select().from(messages).where(eq(messages.id, messageId)).get();
+	if (!current) return null;
+
+	const now = Date.now();
+	db.update(messages)
+		.set({
+			hiddenAt: hidden ? now : null,
+			hiddenBy: hidden ? actor : null
+		})
+		.where(eq(messages.id, messageId))
+		.run();
+
+	return {
+		...current,
+		hiddenAt: hidden ? now : null,
+		hiddenBy: hidden ? actor : null
+	};
 }

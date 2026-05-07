@@ -115,3 +115,71 @@ we do not have one yet.
 - Operators who need to remove data do so out-of-band, with the
   application stopped. This is documented in the operator-facing
   README.
+
+## Addendum 2026-05-07: "immutable but extendable"
+
+The original wording above said "the application has no
+`DELETE FROM messages` or `DELETE FROM approvals` code path."
+While working on issue #15 (channel grooming) it became clear
+that append-only as a stance has two distinct claims tangled
+together:
+
+1. **No row deletion** — a stored row stays stored. This part
+   is uncontroversial and unchanged.
+2. **No row mutation** — once written, the row's columns are
+   final. This is the part that needed sharpening.
+
+The sharper rule we are committing to:
+
+> The **content** of a message or approval row is immutable
+> once written: `body`, `sender_type`, `sender_id`, `created_at`,
+> `id`, and `parent_message_id` on `messages`; `message_id`,
+> `created_at`, and `id` on `approvals`. The application has
+> no code path that mutates any of those columns after the
+> initial INSERT.
+>
+> **State columns** — columns that record an explicit
+> downstream decision *about* the row, made after creation —
+> are allowed to mutate. They do not violate append-only
+> because they record new information rather than rewriting
+> old. Today these are: `approvals.status`,
+> `approvals.targeted_agent_ids`, `approvals.reject_reason`,
+> `approvals.decided_at` (already mutating per ADR-0005's
+> state machine). Issue #15 adds `messages.hidden_at` and
+> `messages.hidden_by` to this list — visibility flags that
+> mark a user's grooming decision without altering content.
+
+For the channel-view path, groomed messages
+(`hidden_at IS NOT NULL`) are filtered out. For the protocol
+viewer (issue #14) and for markdown exports, the visibility
+flag is informational only — those surfaces show the row
+regardless. That gives the user real channel-grooming
+control without compromising audit honesty.
+
+## Addendum 2026-05-07: schema migrations are "immutable but extendable"
+
+A related discipline that came up at the same time: when the
+schema grows, existing data must not be reshaped by the
+migration.
+
+The rule:
+
+- **New columns are NOT NULL with a default**, or **NULLABLE
+  if the absence of a value carries meaning** (e.g. "this
+  message has not been groomed" maps cleanly to
+  `hidden_at IS NULL`, where the NULL is the message and a
+  default would be misleading).
+- A migration may **never** rewrite an existing column's
+  value. If new derived information is wanted, store it in a
+  new column (or a sibling table) and compute it on the way
+  in for new rows; existing rows keep their original content.
+- A migration that needs to delete rows is rejected by
+  review. Use a soft-delete column or accept the existing
+  data; out-of-band SQL is the operator's path, not the
+  application's.
+- New tables are unconstrained — those have no existing data
+  to protect. The discipline is about not retroactively
+  rewriting history.
+
+Net effect: every migration leaves the past as it found it.
+The schema grows; the data does not retell its own story.

@@ -112,10 +112,12 @@ export type BroadcastSystem = {
 
 export type BroadcastStateChanged = {
 	type: 'state_changed';
-	entity: 'channel' | 'agent' | 'channel_member';
+	entity: 'channel' | 'agent' | 'channel_member' | 'message';
 	action: 'created' | 'updated' | 'deleted';
 	/** primary key of the affected row. For channel_member, this is
-	 * the channel id; the affected agent is in `extra.agent_id`. */
+	 * the channel id; the affected agent is in `extra.agent_id`. For
+	 * message updates (e.g. visibility / grooming), the channel id
+	 * is in `extra.channel_id` so subscribers can scope updates. */
 	id: string;
 	extra?: Record<string, string | number | boolean | null>;
 };
