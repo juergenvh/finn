@@ -8,8 +8,6 @@
 		ts: number;
 		approval?: ApprovalSnapshot;
 		members: AgentInfo[];
-		/** Agents that should NOT be selectable as targets (e.g. the
-		 *  authoring agent itself, or the user). */
 		excludeAgentIds?: string[];
 		onDecide: (decision: 'approve' | 'reject', targets: string[], reason: string) => void;
 	};
@@ -29,9 +27,6 @@
 	let rejectReason = $state('');
 	let showRejectReason = $state(false);
 
-	// Initialize target selection from the approval's default targets.
-	// Re-runs only if the approval id changes (so user edits don't get
-	// stomped on as new server snapshots arrive).
 	let initializedFor = '';
 	$effect(() => {
 		if (approval && approval.id !== initializedFor) {
@@ -78,95 +73,123 @@
 	const statusBadge = $derived(approval?.status ?? null);
 </script>
 
-<div class="msg {sender}" class:has-approval={!!approval} class:status-pending={statusBadge === 'pending'} class:status-approved={statusBadge === 'approved'} class:status-routed={statusBadge === 'routed'} class:status-rejected={statusBadge === 'rejected'}>
-	<div class="header">
-		<span class="who">{senderName}</span>
-		<span class="ts">{fmtTs(ts)}</span>
-		{#if statusBadge}
-			<span class="badge {statusBadge}">{statusBadge}</span>
-		{/if}
-	</div>
-
-	<div class="body">{body}</div>
-
-	{#if approval && approval.status === 'pending'}
-		<div class="approval">
-			<div class="targets">
-				<span class="lbl">deliver to:</span>
-				{#each selectableMembers as m (m.id)}
-					<label class="target">
-						<input
-							type="checkbox"
-							checked={selectedTargets.has(m.id)}
-							onchange={() => toggleTarget(m.id)}
-						/>
-						{m.name}
-					</label>
-				{/each}
-				{#if selectableMembers.length === 0}
-					<span class="empty">no other agents in this channel</span>
-				{/if}
-			</div>
-
-			{#if showRejectReason}
-				<div class="reject-row">
-					<input
-						type="text"
-						bind:value={rejectReason}
-						placeholder="reject reason (optional)"
-					/>
-					<button onclick={reject}>confirm reject</button>
-					<button onclick={cancelReject}>cancel</button>
-				</div>
-			{:else}
-				<div class="actions">
-					<button class="approve" onclick={approve} disabled={selectedTargets.size === 0}>
-						approve → {selectedTargets.size} target{selectedTargets.size === 1 ? '' : 's'}
-					</button>
-					<button class="reject" onclick={reject}>reject</button>
-				</div>
+<div class="row {sender}">
+	<div
+		class="bubble {sender}"
+		class:has-approval={!!approval}
+		class:status-pending={statusBadge === 'pending'}
+		class:status-approved={statusBadge === 'approved'}
+		class:status-routed={statusBadge === 'routed'}
+		class:status-rejected={statusBadge === 'rejected'}
+	>
+		<div class="header">
+			<span class="who">{senderName}</span>
+			<span class="ts">{fmtTs(ts)}</span>
+			{#if statusBadge}
+				<span class="badge {statusBadge}">{statusBadge}</span>
 			{/if}
 		</div>
-	{:else if approval && approval.status === 'routed' && approval.targets.length > 0}
-		<div class="approval-summary">
-			✓ routed to {approval.targets.map(nameOf).join(', ')}
-		</div>
-	{:else if approval && approval.status === 'rejected'}
-		<div class="approval-summary rejected">
-			✗ rejected{approval.rejectReason ? `: "${approval.rejectReason}"` : ''}
-		</div>
-	{/if}
+
+		<div class="body">{body}</div>
+
+		{#if approval && approval.status === 'pending'}
+			<div class="approval">
+				<div class="targets">
+					<span class="lbl">deliver to:</span>
+					{#each selectableMembers as m (m.id)}
+						<label class="target">
+							<input
+								type="checkbox"
+								checked={selectedTargets.has(m.id)}
+								onchange={() => toggleTarget(m.id)}
+							/>
+							{m.name}
+						</label>
+					{/each}
+					{#if selectableMembers.length === 0}
+						<span class="empty">no other agents in this channel</span>
+					{/if}
+				</div>
+
+				{#if showRejectReason}
+					<div class="reject-row">
+						<input
+							type="text"
+							bind:value={rejectReason}
+							placeholder="reject reason (optional)"
+						/>
+						<button onclick={reject}>confirm reject</button>
+						<button onclick={cancelReject}>cancel</button>
+					</div>
+				{:else}
+					<div class="actions">
+						<button class="approve" onclick={approve} disabled={selectedTargets.size === 0}>
+							approve → {selectedTargets.size} target{selectedTargets.size === 1 ? '' : 's'}
+						</button>
+						<button class="reject" onclick={reject}>reject</button>
+					</div>
+				{/if}
+			</div>
+		{:else if approval && approval.status === 'routed' && approval.targets.length > 0}
+			<div class="approval-summary">
+				✓ routed to {approval.targets.map(nameOf).join(', ')}
+			</div>
+		{:else if approval && approval.status === 'rejected'}
+			<div class="approval-summary rejected">
+				✗ rejected{approval.rejectReason ? `: "${approval.rejectReason}"` : ''}
+			</div>
+		{/if}
+	</div>
 </div>
 
 <style>
-	.msg {
+	.row {
+		display: flex;
+		width: 100%;
+	}
+	.row.user {
+		justify-content: flex-end;
+	}
+	.row.agent {
+		justify-content: flex-start;
+	}
+	.row.system {
+		justify-content: center;
+	}
+
+	.bubble {
+		max-width: 80%;
 		padding: 0.55rem 0.75rem;
-		border-radius: 6px;
+		border-radius: 10px;
 		border-left: 3px solid transparent;
 	}
-	.msg.user {
-		background: #1a2030;
+	.bubble.user {
+		background: #1e3a5f;
+		border-top-right-radius: 2px;
 	}
-	.msg.agent {
-		background: #1a2a1f;
+	.bubble.agent {
+		background: #1f3a2a;
+		border-top-left-radius: 2px;
 	}
-	.msg.system {
+	.bubble.system {
 		background: transparent;
 		color: #777;
 		font-style: italic;
 		font-size: 0.85rem;
+		max-width: 60%;
+		text-align: center;
 	}
 
-	.msg.status-pending {
+	.bubble.status-pending {
 		border-left-color: #f59e0b;
 	}
-	.msg.status-approved {
+	.bubble.status-approved {
 		border-left-color: #38bdf8;
 	}
-	.msg.status-routed {
+	.bubble.status-routed {
 		border-left-color: #6ee7b7;
 	}
-	.msg.status-rejected {
+	.bubble.status-rejected {
 		border-left-color: #f87171;
 		opacity: 0.75;
 	}
@@ -179,12 +202,12 @@
 		font-size: 0.8rem;
 	}
 	.who {
-		color: #cbd5e1;
+		color: #e2e8f0;
 		font-weight: 600;
 		text-transform: lowercase;
 	}
 	.ts {
-		color: #555;
+		color: #64748b;
 		font-size: 0.75rem;
 	}
 	.badge {
@@ -233,7 +256,7 @@
 		align-items: center;
 	}
 	.lbl {
-		color: #888;
+		color: #94a3b8;
 		text-transform: uppercase;
 		font-size: 0.7rem;
 		letter-spacing: 0.05em;

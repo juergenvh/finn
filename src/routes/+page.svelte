@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import MessageBubble from '$lib/ui/MessageBubble.svelte';
 	import type {
 		ChannelInfo,
@@ -33,6 +33,14 @@
 
 	let draft = $state('');
 	let bootstrapError: string | null = $state(null);
+	let messageScroller: HTMLElement | null = $state(null);
+
+	async function scrollToBottom() {
+		await tick();
+		if (messageScroller) {
+			messageScroller.scrollTop = messageScroller.scrollHeight;
+		}
+	}
 
 	const visibleMessages = $derived(
 		activeChannelId ? messagesByChannel[activeChannelId] ?? [] : []
@@ -49,6 +57,14 @@
 		const agent = activeMembers.find((a) => a.id === id);
 		return agent?.name ?? id;
 	}
+
+	// Auto-scroll to bottom whenever the visible message list grows.
+	// Tracks length on the active channel so switching channels also scrolls.
+	$effect(() => {
+		if (activeChannelId && (messagesByChannel[activeChannelId]?.length ?? 0) >= 0) {
+			void scrollToBottom();
+		}
+	});
 
 	async function loadChannelData(channelId: string) {
 		const [msgRes, memRes, apprRes] = await Promise.all([
@@ -228,7 +244,7 @@
 			<div class="error">bootstrap failed: {bootstrapError}</div>
 		{/if}
 
-		<main>
+		<main bind:this={messageScroller}>
 			{#each visibleMessages as m (m.id)}
 				<MessageBubble
 					sender={m.sender}
@@ -261,8 +277,10 @@
 </div>
 
 <style>
-	:global(body) {
+	:global(html, body) {
 		margin: 0;
+		height: 100%;
+		overflow: hidden;
 		font-family: ui-sans-serif, system-ui, sans-serif;
 		background: #0e0e10;
 		color: #e8e8ea;
@@ -271,6 +289,8 @@
 		display: grid;
 		grid-template-columns: 240px 1fr;
 		height: 100vh;
+		width: 100vw;
+		overflow: hidden;
 	}
 	aside {
 		background: #16161a;
@@ -356,6 +376,8 @@
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
+		height: 100vh;
+		overflow: hidden;
 	}
 	.main header {
 		padding: 0.75rem 1rem;
@@ -377,7 +399,8 @@
 		font-size: 0.9rem;
 	}
 	main {
-		flex: 1;
+		flex: 1 1 auto;
+		min-height: 0;          /* allow the flex item to shrink so its overflow scrolls */
 		overflow-y: auto;
 		padding: 1rem;
 		display: flex;
@@ -385,10 +408,15 @@
 		gap: 0.5rem;
 	}
 	footer {
+		flex: 0 0 auto;
 		display: flex;
 		gap: 0.5rem;
 		padding: 0.75rem 1rem;
 		border-top: 1px solid #2a2a30;
+		background: #0e0e10;
+	}
+	.main header {
+		flex: 0 0 auto;
 	}
 	textarea {
 		flex: 1;

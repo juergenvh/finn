@@ -92,21 +92,27 @@ export type FinnOutbound =
 
 /* ---- hooks ---- */
 
-export type UserMessageResult = {
-	/** All broadcasts to fan out to clients, in order. */
-	broadcasts: Array<BroadcastMessage | BroadcastApprovalCreated | BroadcastApprovalUpdated | BroadcastSystem>;
-};
+/**
+ * The hook receives an `emit` callback and is expected to call it for
+ * every broadcast as soon as that broadcast is ready. This way the
+ * user's own message reaches their UI *before* slow connector calls
+ * complete — the chat feels live instead of arriving in batches.
+ */
+export type Emit = (
+	event: BroadcastMessage | BroadcastApprovalCreated | BroadcastApprovalUpdated | BroadcastSystem
+) => void;
 
 export interface FinnHooks {
-	onUserMessage?: (msg: { channel_id: string; body: string }) =>
-		| Promise<UserMessageResult>
-		| UserMessageResult;
-	onApprovalDecide?: (msg: {
-		approval_id: string;
-		decision: 'approve' | 'reject';
-		targets?: string[];
-		reject_reason?: string;
-	}) => Promise<UserMessageResult> | UserMessageResult;
+	onUserMessage?: (msg: { channel_id: string; body: string }, emit: Emit) => Promise<void> | void;
+	onApprovalDecide?: (
+		msg: {
+			approval_id: string;
+			decision: 'approve' | 'reject';
+			targets?: string[];
+			reject_reason?: string;
+		},
+		emit: Emit
+	) => Promise<void> | void;
 }
 
 /**
@@ -154,19 +160,20 @@ export function attachWebSocketServer(httpServer: UpgradableHttpServer, hooks: F
 				return;
 			}
 
+			const emit: Emit = (event) => broadcast(wss, event);
+
 			if (parsed.type === 'user_message') {
 				if (!hooks.onUserMessage) {
 					send(ws, { type: 'system', body: 'no user-message handler configured' });
 					return;
 				}
 				try {
-					const result = await hooks.onUserMessage({
-						channel_id: parsed.channel_id,
-						body: parsed.body
-					});
-					for (const b of result.broadcasts) broadcast(wss, b);
+					await hooks.onUserMessage(
+						{ channel_id: parsed.channel_id, body: parsed.body },
+						emit
+					);
 				} catch (err) {
-					broadcast(wss, { type: 'system', body: `error: ${(err as Error).message}` });
+					emit({ type: 'system', body: `error: ${(err as Error).message}` });
 				}
 				return;
 			}
@@ -177,18 +184,17 @@ export function attachWebSocketServer(httpServer: UpgradableHttpServer, hooks: F
 					return;
 				}
 				try {
-					const result = await hooks.onApprovalDecide({
-						approval_id: parsed.approval_id,
-						decision: parsed.decision,
-						targets: parsed.targets,
-						reject_reason: parsed.reject_reason
-					});
-					for (const b of result.broadcasts) broadcast(wss, b);
+					await hooks.onApprovalDecide(
+						{
+							approval_id: parsed.approval_id,
+							decision: parsed.decision,
+							targets: parsed.targets,
+							reject_reason: parsed.reject_reason
+						},
+						emit
+					);
 				} catch (err) {
-					broadcast(wss, {
-						type: 'system',
-						body: `approval error: ${(err as Error).message}`
-					});
+					emit({ type: 'system', body: `approval error: ${(err as Error).message}` });
 				}
 				return;
 			}
