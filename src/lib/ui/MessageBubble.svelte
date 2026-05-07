@@ -198,8 +198,15 @@
 		border-left-color: #6ee7b7;
 	}
 	.bubble.status-rejected {
-		border-left-color: #f87171;
-		opacity: 0.75;
+		border-left-color: #7f1d1d;
+		background: #1a1416;
+		opacity: 0.6;
+	}
+	.bubble.status-rejected .body {
+		color: #5a5a5e;
+	}
+	.bubble.status-rejected .who {
+		color: #6b6b70;
 	}
 
 	.header {
