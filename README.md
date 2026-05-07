@@ -208,6 +208,37 @@ Container mounts:
 The repo never touches `~/finn-data`. Database file stays out of the
 repo. Secrets stay out of the repo. Exports stay out of the repo.
 
+## Trust model
+
+finn is a **scoped operator UI**, not a sandboxed application. It is
+for the same human who operates the connected agents, and it talks to
+those agents over an authenticated channel.
+
+The target authentication architecture:
+
+- Each connected OpenClaw Gateway runs in `trusted-proxy` mode, with
+  the network source (tailscale, loopback, or equivalent) as the
+  trust boundary.
+- finn always sends `x-openclaw-scopes: operator.read operator.write`
+  on every request. Admin, approvals, pairing, and secrets-talking
+  scopes are explicitly *not* requested.
+- A finn process compromised at the application layer therefore
+  cannot reconfigure a gateway, manipulate the approval queue, pair
+  new devices, or reach the secrets-talking surface — it is bounded
+  by what `operator.read` + `operator.write` allow.
+- The bearer secret used during the transitional phase lives at
+  `~/finn-data/secrets/.env` with `0600` permissions, outside the
+  repository.
+
+In the **current transitional posture**, gateways may still run in
+`token` mode, in which case the scope header is ignored and finn
+behaves as a full operator (same trust posture as the OpenClaw TUI on
+the same host). The code is already written for the target posture;
+the migration is a gateway-config task, not a finn change.
+
+Full rationale, options considered, and migration plan: see
+[`docs/decisions/0001-openclaw-connector-auth.md`](docs/decisions/0001-openclaw-connector-auth.md).
+
 ## What's deliberately *not* here
 
 * **storm7.** This project has nothing to do with the storm7.de stack.
