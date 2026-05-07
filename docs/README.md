@@ -22,7 +22,8 @@ docs/
     ├── 0005-approval-flow.md
     ├── 0006-pr-only-after-showcase.md
     ├── 0007-crud-ui-architecture.md
-    └── 0008-globalthis-singleton-for-vite-ws-bridge.md
+    ├── 0008-globalthis-singleton-for-vite-ws-bridge.md
+    └── 0009-log-surface-v1.md
 ```
 
 ## Decisions (ADRs)
@@ -53,6 +54,7 @@ across the project (not per-area).
 | 0006 | PR-only workflow after first end-to-end showcase       | when direct push stops, what PRs look like                              |
 | 0007 | CRUD UI architecture                                   | modal vs route, hardcoded vs schema-driven forms, REST vs WS for writes |
 | 0008 | `globalThis` singleton for the active WebSocket server | dev-mode module-instance trap and the smallest fix                      |
+| 0009 | Log/transcript surface, v1 scope and shape             | pagination, search, filter, export, and mention-autocomplete choices    |
 
 ## Setup guides
 

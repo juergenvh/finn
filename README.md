@@ -13,10 +13,10 @@ ROM-stored dead.
 Single- and two-machine setups verified end-to-end. Core
 capabilities — persistent channels, streaming WS chat, OpenClaw
 connector, approval flow for cross-agent traffic, in-browser CRUD
-for channels and agents — are in place. Real Anthropic connector,
-log/transcript surface, mention autocomplete, markdown rendering
-and markdown export, token-streaming, and launchd integration are
-tracked as open issues; see §"Roadmap".
+for channels and agents, log surface (browse / search / export)
+and mention autocomplete — are in place. Real Anthropic connector,
+rich-rendering / Markdown for message bodies, token-streaming, and
+launchd integration are tracked as open issues; see §"Roadmap".
 
 ## What it is
 
@@ -257,12 +257,20 @@ Read:
 ```
 GET    /api/channels                              list active channels
 GET    /api/channels/:id/messages                 message history
+                                                  (?limit=&before=)
+GET    /api/channels/:id/search?q=                substring search in channel
+GET    /api/channels/:id/export?format=md         markdown download
 GET    /api/channels/:id/members                  channel members
 GET    /api/channels/:id/approvals                approval state hydration
 GET    /api/agents                                list active agents
                                                   (?include_archived=1)
 GET    /api/agents/:id                            single (with parsed config)
 ```
+
+`messages` supports cursor-style backwards pagination via
+`before=<ms>` plus `limit`. The export endpoint sets
+`Content-Disposition: attachment` so the browser saves the file
+rather than rendering it; format is markdown only today.
 
 Write (all bodies validated by zod; all writes also broadcast a
 `state_changed` WS event):
@@ -296,8 +304,12 @@ In ascending order of integration weight:
 4. **Channel + agent CRUD UI** ✓ — in-browser create / edit /
    disable / archive via modal forms. Live cross-tab sync via
    `state_changed` WS events. ADR-0007.
-5. **Markdown export** — *not yet*. Today: query SQLite directly,
-   tracked as part of the log/transcript surface (issue #2).
+5. **Log surface** ✓ — backwards pagination ('Load older'),
+   per-channel substring search, sender / system / rejected-
+   approval filters in the sidebar, full-channel markdown export
+   as browser download. ADR-0009.
+6. **Mention autocomplete** ✓ — typing `@` in the composer pops
+   up channel-member candidates, keyboard-navigable. ADR-0009 §5/6.
 
 ## What this is **not** doing
 
@@ -400,14 +412,22 @@ migration sketch:
 
 Tracked as open GitHub issues:
 
-* **#2** Log/transcript surface — browse, search, mark, export.
-  Next-up after CRUD.
-* **#4** Mention autocomplete in the message composer.
 * **#1** Discovery: rich-rendering for message bubbles
   (Markdown? something else?).
 * **#3** Discovery: token-streaming for assistant replies.
 * **#6** Discovery: where session memory lives
   (finn ↔ agent ↔ user).
+
+Follow-ups under the log surface (issue #2 v1 already shipped):
+
+* Cross-channel search.
+* SQLite FTS5 / ranked search when LIKE feels slow.
+* Range-select mark-and-export of a channel slice.
+* Date-jumper / calendar pagination for very long channels.
+* Persisted per-user filter preferences.
+* Server-side `~/finn-data/exports/` write alongside the
+  browser download.
+* `#channel` autocomplete.
 
 Other known work, not yet ticketed:
 
