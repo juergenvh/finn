@@ -176,8 +176,13 @@
 	 * viewer (#14, when it lands), so the budget on first paint stays
 	 * tight enough that opening a four-month-old chat does not bury
 	 * the user in scroll.
+	 *
+	 * 200 KB is the current pragmatic middle ground; a long quiet
+	 * channel still surfaces its useful context, a chatty one stops
+	 * before becoming a wall of text. Per-channel and per-user
+	 * tuning is tracked as part of issue #18 (settings surface).
 	 */
-	const INITIAL_BUDGET_KB = 64;
+	const INITIAL_BUDGET_KB = 200;
 
 	async function loadChannelData(channelId: string) {
 		const [msgRes, memRes, apprRes] = await Promise.all([
