@@ -84,10 +84,24 @@
 	>
 		{#if sender !== 'system'}
 			<div class="header">
-				<span class="who">{senderName}</span>
-				<span class="ts">{fmtTs(ts)}</span>
-				{#if statusBadge}
-					<span class="badge {statusBadge}">{statusBadge}</span>
+				<div class="header-main">
+					<span class="who">{senderName}</span>
+					<span class="ts">{fmtTs(ts)}</span>
+					{#if statusBadge}
+						<span class="badge {statusBadge}">{statusBadge}</span>
+					{/if}
+				</div>
+				<!-- routing/meta sub-line: appears only when data is present.
+				     for now this only renders for terminal approvals; future
+				     additions (origin agent, relay path, etc.) plug in here. -->
+				{#if approval && approval.status === 'routed' && approval.targets.length > 0}
+					<div class="header-meta">
+						routed to {approval.targets.map(nameOf).join(', ')}
+					</div>
+				{:else if approval && approval.status === 'rejected'}
+					<div class="header-meta">
+						rejected{approval.rejectReason ? `: "${approval.rejectReason}"` : ''}
+					</div>
 				{/if}
 			</div>
 		{/if}
@@ -131,14 +145,6 @@
 						<button class="reject" onclick={reject}>reject</button>
 					</div>
 				{/if}
-			</div>
-		{:else if approval && approval.status === 'routed' && approval.targets.length > 0}
-			<div class="approval-summary">
-				✓ routed to {approval.targets.map(nameOf).join(', ')}
-			</div>
-		{:else if approval && approval.status === 'rejected'}
-			<div class="approval-summary rejected">
-				✗ rejected{approval.rejectReason ? `: "${approval.rejectReason}"` : ''}
 			</div>
 		{/if}
 	</div>
@@ -197,13 +203,21 @@
 	}
 
 	.header {
-		display: flex;
-		align-items: baseline;
-		gap: 0.5rem;
 		padding-bottom: 0.35rem;
 		margin-bottom: 0.4rem;
 		border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+	}
+	.header-main {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
 		font-size: 0.8rem;
+	}
+	.header-meta {
+		margin-top: 0.15rem;
+		color: #64748b;
+		font-size: 0.7rem;
+		line-height: 1.3;
 	}
 	.who {
 		color: #e2e8f0;
@@ -319,14 +333,4 @@
 		border-radius: 4px;
 	}
 
-	.approval-summary {
-		margin-top: 0.5rem;
-		padding-top: 0.4rem;
-		border-top: 1px dashed #2a2a30;
-		font-size: 0.8rem;
-		color: #6ee7b7;
-	}
-	.approval-summary.rejected {
-		color: #f87171;
-	}
 </style>
