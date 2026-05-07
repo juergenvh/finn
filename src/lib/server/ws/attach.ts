@@ -32,14 +32,32 @@ import type { Duplex } from 'node:stream';
 
 const WS_PATH = '/ws';
 
-/* ---- module-scope state for outbound broadcasts ---- */
+/* ---- process-wide state for outbound broadcasts ---- */
 
 /**
  * Reference to the active server, kept so that REST handlers can push
  * state-changed events to all connected clients without going through
  * a per-request hook. Set by attachWebSocketServer; cleared on close.
+ *
+ * Stored on globalThis because Vite's plugin host and the SvelteKit
+ * SSR module graph load this file as separate module instances in
+ * dev (different specifiers, different graphs). Module-scope state
+ * therefore appears twice and the route-side handlers would never
+ * see the WebSocketServer the dev plugin attached.
+ *
+ * The globalThis singleton is process-wide — always one. In the
+ * production server.js path, the SvelteKit handler and the WS
+ * attach run in one shared module graph anyway; the global is just
+ * never observed to differ from a module-local. Net cost: a key on
+ * globalThis. Net benefit: dev and prod agree.
  */
-let activeWss: WebSocketServer | null = null;
+const WSS_KEY = '__finn_active_wss__';
+function getActiveWss(): WebSocketServer | null {
+	return (globalThis as Record<string, unknown>)[WSS_KEY] as WebSocketServer | null ?? null;
+}
+function setActiveWss(wss: WebSocketServer | null): void {
+	(globalThis as Record<string, unknown>)[WSS_KEY] = wss;
+}
 
 /* ---- inbound ---- */
 
@@ -222,7 +240,7 @@ export function attachWebSocketServer(httpServer: UpgradableHttpServer, hooks: F
 	});
 
 	attached = wss;
-	activeWss = wss;
+	setActiveWss(wss);
 	return wss;
 }
 
@@ -233,8 +251,9 @@ export function attachWebSocketServer(httpServer: UpgradableHttpServer, hooks: F
  * paths don't crash.
  */
 export function broadcastStateChange(event: BroadcastStateChanged): void {
-	if (!activeWss) return;
-	broadcast(activeWss, event);
+	const wss = getActiveWss();
+	if (!wss) return;
+	broadcast(wss, event);
 }
 
 /**
@@ -243,8 +262,9 @@ export function broadcastStateChange(event: BroadcastStateChanged): void {
  * messages on membership changes) live to all connected clients.
  */
 export function broadcastEvent(event: FinnOutbound): void {
-	if (!activeWss) return;
-	broadcast(activeWss, event);
+	const wss = getActiveWss();
+	if (!wss) return;
+	broadcast(wss, event);
 }
 
 function send(ws: WebSocket, msg: FinnOutbound): void {

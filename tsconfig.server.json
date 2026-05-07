@@ -30,6 +30,12 @@
 	"exclude": [
 		"node_modules",
 		".svelte-kit",
-		"build"
+		"build",
+		// dev-plugin is loaded by Vite's plugin host (vite.config.ts), not
+		// by the production server. It uses the same module specifiers as
+		// SvelteKit route handlers so Vite collapses everything into one
+		// module instance, which is incompatible with this tsconfig's
+		// .ts-extension import rule. Exclude it from the server build.
+		"src/lib/server/ws/dev-plugin.ts"
 	]
 }
