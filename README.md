@@ -14,7 +14,7 @@ ROM-stored dead.
 ## What it is
 
 A web UI, in a container, on the Mac host. Lets a single user (you)
-chat with several agents from one place, and \u2014 when the user wants \u2014
+chat with several agents from one place, and — when the user wants —
 puts multiple agents in the same channel where they can address each
 other. Every cross-agent message goes through an explicit Approve /
 Reject step at the UI, so the human is structurally always in the
@@ -30,11 +30,11 @@ loop.
 
 ## Why
 
-Sitting at one keyboard and switching between five chat surfaces \u2014
+Sitting at one keyboard and switching between five chat surfaces —
 OpenClaw on the Mac host, OpenClaw remote, OpenClaw in a VM,
-Wintermute on a server, raw API calls to Claude / Moonshot / etc. \u2014
+Wintermute on a server, raw API calls to Claude / Moonshot / etc. —
 is the daily friction this tool removes. As a side effect, it lets
-two or more agents \"talk\" via the user as relay, with the
+two or more agents "talk" via the user as relay, with the
 conversation visible to all parties and logged centrally.
 
 The structural payoff: the same human-in-the-loop pattern that
@@ -152,7 +152,7 @@ every reject reason, with timestamps. Markdown export is a SELECT.
    The message stays in the log for the user's audit trail but is
    never relayed.
 
-User-originated messages skip the approval step \u2014 they're already
+User-originated messages skip the approval step — they're already
 human-decided. The approval gate exists strictly to mediate
 agent-to-agent traffic.
 
@@ -172,21 +172,21 @@ In ascending order of test-case weight:
 
 1. **One-on-one chat** (user ↔ one agent), with approve/reject and
    logging. Connector: OpenClaw via the OpenAI-compatible HTTP API.
-2. **Anthropic connector** \u2014 second endpoint. Plain Claude, no agent
+2. **Anthropic connector** — second endpoint. Plain Claude, no agent
    wrapper. Lets the user 1:1-compare wrapped-agent vs raw-LLM
    behaviour.
-3. **Multi-agent channel** \u2014 user, OpenClaw, and raw Claude in one
+3. **Multi-agent channel** — user, OpenClaw, and raw Claude in one
    room. `@-mentions`, targeted approval. *This is the point at which
    the concept earns its keep.*
-4. **Agent-config CRUD UI** \u2014 add / edit / disable agents from the
+4. **Agent-config CRUD UI** — add / edit / disable agents from the
    browser, no JSON-editing-and-restart.
 5. **Markdown export** of any channel to `/data/exports/`.
 
 What the MVP does **not** include:
 
-* Authentication \u2014 single-user local tool.
-* Agent-to-agent direct connectors \u2014 everything goes through the UI.
-* Streaming responses \u2014 messages return whole.
+* Authentication — single-user local tool.
+* Agent-to-agent direct connectors — everything goes through the UI.
+* Streaming responses — messages return whole.
 * Files, images, voice.
 * Search across channels (comes later, with the log viewer).
 
@@ -238,9 +238,9 @@ GitHub provenance reflects both.
 
 ## Related projects
 
-* `juergenvh/wintermute` \u2014 personal AI agent (Python, on Hetzner).
+* `juergenvh/wintermute` — personal AI agent (Python, on Hetzner).
   Will get a finn-connector eventually but is not part of this stack.
-* `juergenvh/openclaw-server` \u2014 storm7 deployment configs. Unrelated
+* `juergenvh/openclaw-server` — storm7 deployment configs. Unrelated
   to finn; mentioned only so it's clear they don't share anything.
-* `juergenvh/agenticframework` \u2014 the universal meta-framework. Also
+* `juergenvh/agenticframework` — the universal meta-framework. Also
   unrelated; finn is a tool, not a phase.
