@@ -82,7 +82,25 @@ export const messages = sqliteTable('messages', {
 	senderId: text('sender_id'),
 	body: text('body').notNull(),
 	createdAt: integer('created_at').notNull(),
-	parentMessageId: text('parent_message_id')
+	parentMessageId: text('parent_message_id'),
+	/**
+	 * Channel-grooming visibility flag (issue #15, ADR-0004 addendum).
+	 * NULL    = visible in the channel view.
+	 * <ms-ts> = hidden by the user at this timestamp.
+	 *
+	 * The protocol viewer and markdown exports ignore this flag and
+	 * show the row regardless. Setting/clearing this column is the
+	 * one allowed mutation on the messages table; body and the
+	 * other content columns remain immutable.
+	 */
+	hiddenAt: integer('hidden_at'),
+	/**
+	 * Identifier of who hid the message. NULL when not hidden.
+	 * Today always 'jurgen' for finn's single-user MVP; left as a
+	 * column rather than a constant so a future per-user model
+	 * doesn't need a schema reshape.
+	 */
+	hiddenBy: text('hidden_by')
 });
 
 /* --------------------------------------------------------------- approvals */

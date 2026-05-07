@@ -20,6 +20,8 @@ export type DBMessage = {
 	senderId: string | null;
 	body: string;
 	createdAt: number;
+	hiddenAt?: number | null;
+	hiddenBy?: string | null;
 };
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'routed';
@@ -36,7 +38,7 @@ export type ApprovalSnapshot = {
 
 export type WSStateChanged = {
 	type: 'state_changed';
-	entity: 'channel' | 'agent' | 'channel_member';
+	entity: 'channel' | 'agent' | 'channel_member' | 'message';
 	action: 'created' | 'updated' | 'deleted';
 	id: string;
 	extra?: Record<string, string | number | boolean | null>;
