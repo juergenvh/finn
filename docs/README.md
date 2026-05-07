@@ -10,6 +10,7 @@ posture, setup instructions, and lessons learned.
 ```
 docs/
 ├── README.md              ← this file (index + when-to-write-what)
+├── contributing.md        ← branch / PR workflow (ADR-0006)
 ├── setup.md               ← single-machine setup walkthrough
 ├── setup-mac.md           ← Mac host + remote VM gateway walkthrough
 ├── lessons.md             ← things we got wrong and what we changed
@@ -18,7 +19,8 @@ docs/
     ├── 0002-session-key-format.md
     ├── 0003-id-formats.md
     ├── 0004-message-persistence.md
-    └── 0005-approval-flow.md
+    ├── 0005-approval-flow.md
+    └── 0006-pr-only-after-showcase.md
 ```
 
 ## Decisions (ADRs)
@@ -46,6 +48,7 @@ across the project (not per-area).
 | 0003 | ID formats for entities                        | prefixed nanoid-12 across all primary keys              |
 | 0004 | Append-only messages, soft-delete elsewhere    | which tables get DELETE, which get `deleted_at`, which neither |
 | 0005 | Approval flow for cross-agent traffic          | when approvals trigger, sender experience, UI placement |
+| 0006 | PR-only workflow after first end-to-end showcase | when direct push stops, what PRs look like            |
 
 ## Setup guides
 

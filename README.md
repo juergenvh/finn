@@ -361,6 +361,7 @@ Tracked rough-order:
 | File                                                                                       | Purpose                                                |
 | ------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
 | `README.md` (this file)                                                                    | front door, capabilities, links                        |
+| `docs/contributing.md`                                                                     | branch / PR workflow (ADR-0006)                        |
 | `docs/setup.md`                                                                            | single-machine setup (gateway local)                   |
 | `docs/setup-mac.md`                                                                        | two-machine setup (gateway in VM)                      |
 | `docs/decisions/`                                                                          | ADRs — architectural decisions, immutable + numbered   |
