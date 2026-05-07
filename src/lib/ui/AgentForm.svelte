@@ -26,9 +26,13 @@
 
 	let { mode, agent, onSubmit, onCancel }: Props = $props();
 
-	let name = $state(agent?.name ?? '');
-	let enabled = $state(agent?.enabled ?? true);
-	let connectorType = $state<ConnectorType>(agent?.connectorType ?? 'openclaw');
+	// Form-state. See ChannelForm.svelte for the rationale on the
+	// `initializedFor` pattern: re-initialise from props only when the
+	// inbound `agent` identity changes, so user edits are not stomped
+	// on incidental re-renders.
+	let name = $state('');
+	let enabled = $state(true);
+	let connectorType = $state<ConnectorType>('openclaw');
 	let submitting = $state(false);
 	let errorMsg = $state<string | null>(null);
 
@@ -36,22 +40,34 @@
 	// only the fields belonging to the current connector type when
 	// submitting, so switching back and forth (in create mode)
 	// preserves previously-entered values.
-	const initialConfig = (agent?.config ?? {}) as Record<string, unknown>;
-
-	let openclawBaseUrl = $state(
-		(initialConfig.base_url as string | undefined) ?? 'http://127.0.0.1:18789/v1'
-	);
-	let openclawTokenEnvVar = $state(
-		(initialConfig.token_env_var as string | undefined) ?? 'FINN_OPENCLAW_API_KEY'
-	);
-	let openclawModel = $state((initialConfig.model as string | undefined) ?? 'openclaw');
-
-	let stubPersona = $state((initialConfig.persona as string | undefined) ?? 'a generic assistant');
+	let openclawBaseUrl = $state('http://127.0.0.1:18789/v1');
+	let openclawTokenEnvVar = $state('FINN_OPENCLAW_API_KEY');
+	let openclawModel = $state('openclaw');
+	let stubPersona = $state('a generic assistant');
 	let stubRepliesText = $state(
-		Array.isArray(initialConfig.replies)
-			? (initialConfig.replies as string[]).join('\n')
-			: ['notiert.', 'interessant. @dixie?', 'ich bleibe skeptisch.'].join('\n')
+		['notiert.', 'interessant. @dixie?', 'ich bleibe skeptisch.'].join('\n')
 	);
+
+	let initializedFor = $state<string | null>(null);
+
+	$effect(() => {
+		const key = agent?.id ?? '__create__';
+		if (initializedFor === key) return;
+		const initialConfig = (agent?.config ?? {}) as Record<string, unknown>;
+		name = agent?.name ?? '';
+		enabled = agent?.enabled ?? true;
+		connectorType = agent?.connectorType ?? 'openclaw';
+		openclawBaseUrl =
+			(initialConfig.base_url as string | undefined) ?? 'http://127.0.0.1:18789/v1';
+		openclawTokenEnvVar =
+			(initialConfig.token_env_var as string | undefined) ?? 'FINN_OPENCLAW_API_KEY';
+		openclawModel = (initialConfig.model as string | undefined) ?? 'openclaw';
+		stubPersona = (initialConfig.persona as string | undefined) ?? 'a generic assistant';
+		stubRepliesText = Array.isArray(initialConfig.replies)
+			? (initialConfig.replies as string[]).join('\n')
+			: ['notiert.', 'interessant. @dixie?', 'ich bleibe skeptisch.'].join('\n');
+		initializedFor = key;
+	});
 
 	const canSubmit = $derived(name.trim().length > 0 && !submitting);
 
