@@ -31,6 +31,7 @@
  */
 
 import type { OpenAICompatibleConfig } from '../db/agent-config.ts';
+import { parseSseStream } from './sse-parser.ts';
 
 type ChatMessage = {
 	role: 'system' | 'user' | 'assistant';
@@ -105,4 +106,74 @@ async function send(args: OpenAICompatibleSendArgs): Promise<string> {
 	return content;
 }
 
-export const openAICompatibleConnector = { send };
+/**
+ * Streaming variant of `send`. Issues the same request shape but
+ * with `stream: true`, parses the SSE response, and yields content
+ * deltas as they arrive.
+ *
+ * The first chunk's arrival latency is the *real* first-byte
+ * latency of the upstream agent (Anthropic SSE for Wintermute,
+ * Ollama SSE for local backends). For backends that don't
+ * actually stream token-by-token (Wintermute today; see ADR-0013
+ * §"Backend streaming maturity"), the entire reply arrives in a
+ * single chunk — still better than non-streaming because the
+ * dispatcher unblocks the next agent the moment this one's stream
+ * terminates.
+ *
+ * Throws on:
+ *   - HTTP non-2xx (with body excerpt for diagnosis).
+ *   - Mid-stream upstream errors (`finish_reason: "error"` frame).
+ *   - Stream end without any content (caller surfaces as
+ *     `message_error`).
+ */
+async function* streamReply(
+	args: OpenAICompatibleSendArgs
+): AsyncGenerator<string, void, void> {
+	const {
+		base_url: baseUrl,
+		model_hint: modelHint,
+		token_env_var: tokenEnvVar
+	} = args.config;
+	const apiKey = process.env[tokenEnvVar] ?? '';
+
+	const messages: ChatMessage[] = [
+		{ role: 'system', content: SYSTEM_PROMPT },
+		{ role: 'user', content: args.body }
+	];
+
+	const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+
+	const headers: Record<string, string> = {
+		'content-type': 'application/json',
+		// Hint to upstream proxies that this is a streaming response;
+		// the actual content-type comes back as text/event-stream.
+		accept: 'text/event-stream'
+	};
+	if (apiKey) {
+		headers.authorization = `Bearer ${apiKey}`;
+	}
+
+	const requestBody = {
+		model: modelHint,
+		messages,
+		user: args.channelId,
+		stream: true
+	};
+
+	const res = await fetch(url, {
+		method: 'POST',
+		headers,
+		body: JSON.stringify(requestBody)
+	});
+
+	if (!res.ok) {
+		const text = await res.text().catch(() => '');
+		throw new Error(
+			`openai-compatible ${res.status}: ${text.slice(0, 200)}`
+		);
+	}
+
+	yield* parseSseStream(res.body);
+}
+
+export const openAICompatibleConnector = { send, streamReply };

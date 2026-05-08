@@ -54,6 +54,7 @@
  */
 
 import type { OpenclawConfig } from '../db/agent-config.ts';
+import { parseSseStream } from './sse-parser.ts';
 
 /**
  * Scope set finn declares on every OpenClaw request.
@@ -189,4 +190,62 @@ async function send(args: OpenclawSendArgs): Promise<string> {
 	return content;
 }
 
-export const openclawConnector = { send };
+/**
+ * Streaming variant of `send`. Same request shape (incl. ADR-0001
+ * scopes header and ADR-0002+0012 agent-aware session-key) but
+ * with `stream: true`, parses the SSE response, and yields content
+ * deltas as they arrive.
+ *
+ * OpenClaw passes Anthropic / Ollama SSE through directly, so for
+ * agents pointing at those backends the stream is genuinely
+ * token-by-token. See ADR-0013 §"Backend streaming maturity".
+ *
+ * Throws on:
+ *   - HTTP non-2xx (with body excerpt for diagnosis).
+ *   - Mid-stream upstream errors (`finish_reason: "error"` frame).
+ *   - Stream end without any content (caller surfaces as
+ *     `message_error`).
+ */
+async function* streamReply(
+	args: OpenclawSendArgs
+): AsyncGenerator<string, void, void> {
+	const { base_url: baseUrl, model, token_env_var: tokenEnvVar } = args.config;
+	const apiKey = process.env[tokenEnvVar] ?? '';
+
+	const messages: ChatMessage[] = [
+		{ role: 'system', content: SYSTEM_PROMPT },
+		{ role: 'user', content: args.body }
+	];
+
+	const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+
+	const explicitAgentId = explicitAgentIdFromModel(model);
+
+	const headers: Record<string, string> = {
+		'content-type': 'application/json',
+		// Hint to upstream proxies that this is a streaming response.
+		accept: 'text/event-stream',
+		// See ADR-0001. Always declare the scope.
+		'x-openclaw-scopes': FINN_SCOPES,
+		// See ADR-0002 + ADR-0012. Same session-key derivation as send().
+		'x-openclaw-session-key': sessionKeyFor(explicitAgentId, args.channelId)
+	};
+	if (apiKey) {
+		headers.authorization = `Bearer ${apiKey}`;
+	}
+
+	const res = await fetch(url, {
+		method: 'POST',
+		headers,
+		body: JSON.stringify({ model, messages, stream: true })
+	});
+
+	if (!res.ok) {
+		const text = await res.text().catch(() => '');
+		throw new Error(`openclaw ${res.status}: ${text.slice(0, 200)}`);
+	}
+
+	yield* parseSseStream(res.body);
+}
+
+export const openclawConnector = { send, streamReply };
