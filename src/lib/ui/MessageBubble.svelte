@@ -306,6 +306,27 @@
 	.body {
 		white-space: pre-wrap;
 		word-break: break-word;
+		/* Conversation body in a console-leaning monospace stack.
+		 * Header, approval controls, and system notices stay in the
+		 * page's sans-serif voice on purpose — only the message
+		 * content gets the terminal feel. ui-monospace picks the
+		 * platform-native console font (SF Mono on macOS, Cascadia
+		 * on Windows 11, etc.); the explicit fallbacks cover older
+		 * browsers and Linux distros without a touched system. No
+		 * webfonts, no network round-trip. */
+		font-family:
+			ui-monospace,
+			SFMono-Regular,
+			'SF Mono',
+			Menlo,
+			Monaco,
+			'Cascadia Mono',
+			'Cascadia Code',
+			Consolas,
+			'DejaVu Sans Mono',
+			monospace;
+		font-size: 0.875rem;
+		line-height: 1.45;
 	}
 
 	.approval {
