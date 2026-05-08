@@ -1,10 +1,13 @@
 # ADR 0002 — Session-key format on the OpenClaw connector
 
-- **Status:** accepted
+- **Status:** accepted (decision § superseded by ADR-0012)
 - **Date:** 2026-05-07
 - **Deciders:** Jürgen, Dixie
 - **Supersedes:** —
-- **Related:** ADR-0001
+- **Superseded-by:** ADR-0012 (decision § only — the format gains an
+  agent component on 2026-05-08; the rationale and options-considered
+  here remain authoritative)
+- **Related:** ADR-0001, ADR-0012
 
 ## Context
 
