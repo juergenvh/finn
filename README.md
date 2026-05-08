@@ -21,9 +21,11 @@ is structurally split into two surfaces:
   search, filter, and markdown export of the full message history
   including groomed rows.
 
-Real Anthropic connector, rich-rendering / Markdown for message
-bodies, token-streaming, settings surface, and launchd integration
-are tracked as open issues; see §"Roadmap".
+Rich-rendering / Markdown for message bodies, token-streaming +
+reply-sequencing, settings surface, and launchd integration are
+tracked as open issues; see §"Roadmap". Wintermute and any other
+OpenAI-compatible backend are reachable today via the
+`openai-compatible` connector type.
 
 ## What it is
 
@@ -97,9 +99,11 @@ user's job, mediated by the UI.
 │                                 │                                  │
 │   ┌─────────────────────────────┴────────────────────────────────┐ │
 │   │  connectors                                                  │ │
-│   │   • openclaw.ts          OpenAI-compatible HTTP API          │ │
+│   │   • openclaw.ts          OpenClaw Gateway w/ scopes/sess-key │ │
+│   │   • openai-compatible.ts vanilla OpenAI Chat Completions     │ │
 │   │   • anthropic-stub.ts    canned replies, dev/test            │ │
-│   │   • (planned) anthropic.ts, wintermute.ts                    │ │
+│   │   • sse-parser.ts        shared SSE-frame consumer (PR #39)  │ │
+│   │   • (planned) anthropic.ts — direct, bypassing OpenClaw     │ │
 │   └─────────────────────────────┬────────────────────────────────┘ │
 │                                 │                                  │
 │   ┌─────────────────────────────┴────────────────────────────────┐ │
@@ -113,8 +117,9 @@ user's job, mediated by the UI.
 ┌────────────────────────────────────────────────────────────────────┐
 │  agent endpoints (out-of-process, HTTP)                            │
 │   • OpenClaw Gateway        scoped operator headers (ADR-0001)     │
-│   • Anthropic API           planned                                │
-│   • Wintermute, ...         planned                                │
+│   • Wintermute /v1/*        OpenAI-compat, bearer-gated, TLS       │
+│   • Other OpenAI-compat    Open WebUI, vLLM, llama.cpp, …          │
+│   • Anthropic API direct   planned                                 │
 └────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────┐
@@ -330,34 +335,49 @@ table. Body, sender, and timestamp remain immutable; only
 In ascending order of integration weight:
 
 1. **One-on-one chat** ✓ — user ↔ agent over OpenClaw connector,
-   per-channel session continuity (ADR-0002).
-2. **Anthropic connector** — *stub only* today (canned replies for
-   exercising the multi-agent flow without a real key). Real
-   implementation is on the roadmap.
-3. **Multi-agent channel** ✓ — user, OpenClaw, and stub-Anthropic
-   in one room. `@-mentions`, targeted approval, recursive approval
-   for relayed replies that mention yet another agent.
-4. **Channel + agent CRUD UI** ✓ — in-browser create / edit /
+   per-channel session continuity (ADR-0002 + 0012).
+2. **OpenAI-compatible connector** ✓ — talks to any backend that
+   speaks vanilla OpenAI Chat Completions. Verified end-to-end
+   against Wintermute's `/v1/*` adapter at `agent.storm7.de`.
+   See `docs/connectors.md` Scenario C.
+3. **Anthropic connector** — *stub only* today (canned replies for
+   exercising the multi-agent flow without a real key). Anthropic
+   Cloud is otherwise reachable via the `openclaw` connector when
+   OpenClaw is configured for it; a direct connector that bypasses
+   OpenClaw is on the roadmap.
+4. **Multi-agent channel** ✓ — user, OpenClaw, OpenAI-compat
+   (Wintermute), and/or stub agents in one room. `@-mentions`,
+   targeted approval, recursive approval for relayed replies that
+   mention yet another agent.
+5. **Channel + agent CRUD UI** ✓ — in-browser create / edit /
    disable / archive via modal forms. Live cross-tab sync via
    `state_changed` WS events. ADR-0007.
-5. **Log surface** ✓ — backwards pagination ('Load older'),
+6. **Log surface** ✓ — backwards pagination ('Load older'),
    per-channel substring search, sender / system / rejected-
    approval filters in the sidebar, full-channel markdown export
    as browser download. ADR-0009.
-6. **Mention autocomplete** ✓ — typing `@` in the composer pops
+7. **Mention autocomplete** ✓ — typing `@` in the composer pops
    up channel-member candidates, keyboard-navigable. ADR-0009 §5/6.
-7. **KB-budget initial load** ✓ — channel view caps cumulative
+8. **User-mention dispatch filtering** ✓ — `@gwen hi` in a
+   multi-agent channel only dispatches to Gwen, not to every
+   channel member. Closed by PR #29 (issue #27).
+9. **KB-budget initial load** ✓ — channel view caps cumulative
    body size on first paint (default 200 KB). 'Load older' still
    walks back further. ADR-0011.
-8. **Channel grooming** ✓ — hide-from-channel-view marker on each
-   message bubble; protocol viewer and exports ignore the marker
-   per audit discipline. ADR-0004 addendum.
-9. **Protocol viewer** ✓ — separate `/protocol` route. Cross-
-   channel browse with multi-channel filter, full-text search,
-   sender filter (type + specific agent), date range, visibility
-   selector, only-rejected flag, cursor-paginated, markdown export
-   of the current filter result. URL search-params are the filter
-   source-of-truth. ADR-0010.
+10. **Channel grooming** ✓ — hide-from-channel-view marker on each
+    message bubble; protocol viewer and exports ignore the marker
+    per audit discipline. ADR-0004 addendum.
+11. **Protocol viewer** ✓ — separate `/protocol` route. Cross-
+    channel browse with multi-channel filter, full-text search,
+    sender filter (type + specific agent), date range, visibility
+    selector, only-rejected flag, cursor-paginated, markdown export
+    of the current filter result. URL search-params are the filter
+    source-of-truth. ADR-0010.
+12. **Streaming-capable connectors** ✓ — both `openclaw` and
+    `openai-compatible` connectors can consume OpenAI-style SSE
+    streams via the shared `sse-parser.ts` helper. The dispatcher
+    has not yet been switched to use them; that's the next phase
+    of issue #3 (ADR-0013).
 
 ## What this is **not** doing
 
@@ -458,16 +478,38 @@ migration sketch:
 
 ## Roadmap
 
-Tracked as open GitHub issues:
+Issues are tagged with `phase 1` / `phase 2` / `phase 3` labels
+reflecting how directly they affect daily-use viability. Phase 1
+issues are what stand between the current spike and finn being a
+tool you reach for every day.
+
+**Phase 1 — daily-use blockers:**
 
 * **#1** Discovery: rich-rendering for message bubbles
   (Markdown? something else?).
-* **#3** Discovery: token-streaming for assistant replies.
+* **#3** Token-streaming + reply-sequencing for assistant replies.
+  Phase 1 (connectors) shipped via PR #39; phase 2 (dispatcher
+  switch) is the next visible UX flip. ADR-0013.
+
+**Phase 2 — quality-of-life:**
+
+* **#18** Settings surface — global defaults vs per-channel
+  overrides for KB budget and other knobs.
+* **#26** Channel-create member selection UX (email-client-style
+  chips).
+* **#28** Per-channel toggle to auto-approve agent-to-agent
+  mentions.
+
+**Phase 3 — nice-to-have / discovery:**
+
 * **#6** Discovery: where session memory lives
   (finn ↔ agent ↔ user) — plus the addendum on memory-storage
   signalling from connectors.
-* **#18** Discovery: settings surface — global defaults vs
-  per-channel overrides for KB budget and other knobs.
+* **#22** Discovery: connector backend-model override
+  (`x-openclaw-model`).
+* **#25** Bug: cannot reuse channel name after archive.
+* **#30** Discovery: protocol-viewer audit-aware channel picker
+  (archived channels missing from the filter).
 
 Follow-ups under earlier issues:
 
@@ -477,6 +519,10 @@ Follow-ups under earlier issues:
 * Persisted per-user filter preferences (folds into #18).
 * Server-side `~/finn-data/exports/` write alongside the
   browser download.
+
+Closed today (2026-05-08): #23 agent-aware session-keys (ADR-0012),
+#27 user-mention dispatch filtering, #34 groomed-filter server-side
+bug, #36 routed-to header race condition.
 * `#channel` autocomplete in the composer.
 * `?channel=<id>` query-param handler at `/` so the protocol
   viewer's channel-pill links land on the right channel.

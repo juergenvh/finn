@@ -531,6 +531,37 @@ calling, session keys, and fallback routing.
 
 ---
 
+## Streaming status
+
+As of PR #39, both `openclaw` and `openai-compatible` connectors
+expose a `streamReply()` method that consumes OpenAI-style SSE
+frames (`data: {chunk}\n\n` ... `data: [DONE]`). The implementation
+is in `src/lib/server/connectors/sse-parser.ts` plus the
+connector-specific `streamReply` functions.
+
+**It is not yet wired into the dispatcher.** § `dispatchUserMessage`
+and `handle-approval-decide` still call the non-streaming `send()`
+path, so user-visible behaviour is unchanged: replies arrive whole,
+and multi-agent channels still wait for the slowest reply before
+showing any. The dispatcher switch is the next phase, tracked
+under issue #3 with the design captured in ADR-0013.
+
+When the switch lands:
+
+- Each agent's bubble starts rendering the moment its connector
+  call begins (or its first byte arrives), instead of after all
+  connectors have settled.
+- For backends that genuinely stream (OpenClaw → Anthropic,
+  OpenClaw → Ollama), bubbles fill token by token.
+- For backends that don't (Wintermute today; see
+  ADR-0013 §"Backend streaming maturity"), the bubble shows a
+  placeholder while the call is in flight, then the entire reply
+  drops in once the connector's stream terminates. The sequencing
+  win still applies — other agents are no longer blocked by the
+  slowest call.
+
+---
+
 ## Troubleshooting
 
 **`openclaw 401` from finn.** Bearer token wrong or env var not
