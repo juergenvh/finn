@@ -5,8 +5,9 @@
  * ready:
  *   1. Persist the user turn → emit it (so the user's bubble appears
  *      immediately, before any connector latency).
- *   2. Fan out to every channel member agent in parallel; for each
- *      reply that arrives, persist it and emit it.
+ *   2. Dispatch to channel-member agents (narrowed to mentioned
+ *      agents if the body contains `@-mentions`, see issue #27);
+ *      for each reply that arrives, persist it and emit it.
  *   3. For agent replies that mention other agents, create an approval
  *      row and emit `approval_created`.
  *
@@ -17,7 +18,7 @@
 
 import type { Emit, BroadcastMessage } from './ws/attach.ts';
 import { recordUserMessage, recordAgentMessage } from './messages.ts';
-import { dispatchUserMessage, type DispatchedReply } from './connectors/registry.ts';
+import { dispatchUserMessage, type DispatchResult } from './connectors/registry.ts';
 import { resolveMentionedAgents } from './mentions.ts';
 import { createPendingApproval, targetsOf } from './approvals.ts';
 
@@ -44,15 +45,38 @@ export async function handleUserMessage(
 	const userRow = recordUserMessage({ channelId: args.channel_id, body: args.body });
 	emit(messageBroadcast(userRow, 'user', userRow.senderId ?? 'jurgen'));
 
-	let replies: Array<DispatchedReply | { agentId: string; error: string }>;
+	let result: DispatchResult;
 	try {
-		replies = await dispatchUserMessage({ channel_id: args.channel_id, body: args.body });
+		result = await dispatchUserMessage({ channel_id: args.channel_id, body: args.body });
 	} catch (err) {
 		emit({ type: 'system', body: `dispatch error: ${(err as Error).message}` });
 		return;
 	}
 
-	for (const reply of replies) {
+	// Surface mention diagnostics. Two cases worth telling the user:
+	//   1) They mentioned something that does not match any channel
+	//      member — we silently dropped it; warn so they know.
+	//   2) They mentioned only non-members — nothing was dispatched
+	//      at all; tell them explicitly because the absence of replies
+	//      otherwise looks like the agents went silent.
+	if (result.diagnostics.unresolvedMentionTokens.length > 0) {
+		const unresolved = result.diagnostics.unresolvedMentionTokens
+			.map((t) => `@${t}`)
+			.join(', ');
+		if (result.replies.length === 0) {
+			emit({
+				type: 'system',
+				body: `${unresolved} not in this channel — no agent was dispatched.`
+			});
+		} else {
+			emit({
+				type: 'system',
+				body: `${unresolved} not in this channel — dispatched only the resolved mentions.`
+			});
+		}
+	}
+
+	for (const reply of result.replies) {
 		if ('error' in reply) {
 			emit({ type: 'system', body: `agent ${reply.agentId} error: ${reply.error}` });
 			continue;
