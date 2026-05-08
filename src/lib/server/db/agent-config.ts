@@ -32,6 +32,45 @@ export const OpenclawConfigSchema = z.object({
 
 export type OpenclawConfig = z.infer<typeof OpenclawConfigSchema>;
 
+/* ----------------------------------------- openai-compatible connector */
+
+/**
+ * OpenAI-compatible connector configuration.
+ *
+ * For backends that expose an OpenAI-style `/chat/completions`
+ * endpoint of their own — e.g. Wintermute's `/v1/*` adapter
+ * (see https://github.com/juergenvh/wintermute, docs/OPENAI-COMPAT.md),
+ * Open WebUI, LobeChat, LibreChat, vLLM, llama.cpp's server, etc.
+ *
+ * The wire is intentionally vanilla OpenAI: no `x-openclaw-*`
+ * headers, no agent-routing in the model field, no model splitting.
+ * If a backend speaks the OpenAI Chat Completions wire, this
+ * connector talks to it.
+ *
+ * Conversation continuity uses OpenAI's standard `user` body field,
+ * set to the finn channel id so the backend can pin per-channel
+ * sessions on its side (Wintermute does, others may not).
+ */
+export const OpenAICompatibleConfigSchema = z.object({
+	connector_type: z.literal('openai-compatible'),
+	/** Base URL ending in /v1 (or whatever the backend's OpenAI-style
+	 * root is). The connector appends `/chat/completions` itself. */
+	base_url: z.string().url(),
+	/** Name of the env var that holds the bearer token. The token
+	 * itself NEVER lives in the DB. We read process.env[token_env_var]
+	 * at connector-call time. */
+	token_env_var: z.string().min(1).default('FINN_OPENAI_COMPAT_API_KEY'),
+	/** Value sent in the OpenAI `model` body field. The OpenAI wire
+	 * requires *something* there even when the backend ignores it
+	 * (Wintermute does); some backends use it as a router key. The
+	 * default "default" works against backends that ignore the field;
+	 * use the backend-specific value (e.g. "wintermute",
+	 * "meta-llama-3.1-8b-instruct") when the backend respects it. */
+	model_hint: z.string().min(1).default('default')
+});
+
+export type OpenAICompatibleConfig = z.infer<typeof OpenAICompatibleConfigSchema>;
+
 /* ---------------------------------------------- anthropic-stub connector */
 
 import { AnthropicStubConfigSchema } from '../connectors/anthropic-stub.ts';
@@ -43,6 +82,7 @@ export type { AnthropicStubConfig } from '../connectors/anthropic-stub.ts';
 /** Single connector schema. Add new connectors as additional branches. */
 export const ConnectorConfigSchema = z.discriminatedUnion('connector_type', [
 	OpenclawConfigSchema,
+	OpenAICompatibleConfigSchema,
 	AnthropicStubConfigSchema
 ]);
 

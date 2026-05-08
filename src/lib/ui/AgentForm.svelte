@@ -1,5 +1,5 @@
 <script lang="ts">
-	type ConnectorType = 'openclaw' | 'anthropic-stub';
+	type ConnectorType = 'openclaw' | 'openai-compatible' | 'anthropic-stub';
 
 	export type AgentFormPayload = {
 		mode: 'create' | 'edit';
@@ -43,6 +43,9 @@
 	let openclawBaseUrl = $state('http://127.0.0.1:18789/v1');
 	let openclawTokenEnvVar = $state('FINN_OPENCLAW_API_KEY');
 	let openclawModel = $state('openclaw');
+	let oaiCompatBaseUrl = $state('https://agent.example.com/v1');
+	let oaiCompatTokenEnvVar = $state('FINN_OPENAI_COMPAT_API_KEY');
+	let oaiCompatModelHint = $state('default');
 	let stubPersona = $state('a generic assistant');
 	let stubRepliesText = $state(
 		['notiert.', 'interessant. @dixie?', 'ich bleibe skeptisch.'].join('\n')
@@ -57,11 +60,22 @@
 		name = agent?.name ?? '';
 		enabled = agent?.enabled ?? true;
 		connectorType = agent?.connectorType ?? 'openclaw';
-		openclawBaseUrl =
-			(initialConfig.base_url as string | undefined) ?? 'http://127.0.0.1:18789/v1';
-		openclawTokenEnvVar =
-			(initialConfig.token_env_var as string | undefined) ?? 'FINN_OPENCLAW_API_KEY';
-		openclawModel = (initialConfig.model as string | undefined) ?? 'openclaw';
+		// openclaw / openai-compatible share base_url and token_env_var
+		// shape but live in separate state so a user switching the
+		// connector type in create-mode doesn't lose either entry.
+		if (agent?.connectorType === 'openclaw') {
+			openclawBaseUrl =
+				(initialConfig.base_url as string | undefined) ?? 'http://127.0.0.1:18789/v1';
+			openclawTokenEnvVar =
+				(initialConfig.token_env_var as string | undefined) ?? 'FINN_OPENCLAW_API_KEY';
+			openclawModel = (initialConfig.model as string | undefined) ?? 'openclaw';
+		} else if (agent?.connectorType === 'openai-compatible') {
+			oaiCompatBaseUrl =
+				(initialConfig.base_url as string | undefined) ?? 'https://agent.example.com/v1';
+			oaiCompatTokenEnvVar =
+				(initialConfig.token_env_var as string | undefined) ?? 'FINN_OPENAI_COMPAT_API_KEY';
+			oaiCompatModelHint = (initialConfig.model_hint as string | undefined) ?? 'default';
+		}
 		stubPersona = (initialConfig.persona as string | undefined) ?? 'a generic assistant';
 		stubRepliesText = Array.isArray(initialConfig.replies)
 			? (initialConfig.replies as string[]).join('\n')
@@ -78,6 +92,14 @@
 				base_url: openclawBaseUrl.trim(),
 				token_env_var: openclawTokenEnvVar.trim(),
 				model: openclawModel.trim()
+			};
+		}
+		if (connectorType === 'openai-compatible') {
+			return {
+				connector_type: 'openai-compatible',
+				base_url: oaiCompatBaseUrl.trim(),
+				token_env_var: oaiCompatTokenEnvVar.trim(),
+				model_hint: oaiCompatModelHint.trim()
 			};
 		}
 		const replies = stubRepliesText
@@ -120,6 +142,7 @@
 		<span class="lbl">Connector type</span>
 		<select bind:value={connectorType} disabled={mode === 'edit'}>
 			<option value="openclaw">openclaw</option>
+			<option value="openai-compatible">openai-compatible (Wintermute, Open WebUI, vLLM, …)</option>
 			<option value="anthropic-stub">anthropic-stub (canned replies)</option>
 		</select>
 		{#if mode === 'edit'}
@@ -154,6 +177,37 @@
 				<span class="hint">
 					OpenClaw agent target. <code>openclaw</code> = default agent;
 					<code>openclaw/&lt;agentId&gt;</code> for a specific one.
+				</span>
+			</label>
+		</fieldset>
+	{:else if connectorType === 'openai-compatible'}
+		<fieldset>
+			<legend>OpenAI-compatible configuration</legend>
+			<label>
+				<span class="lbl">Base URL</span>
+				<input bind:value={oaiCompatBaseUrl} placeholder="https://agent.example.com/v1" />
+				<span class="hint">
+					Base URL ending in <code>/v1</code> (or whatever the backend's
+					OpenAI-style root is). The connector appends <code>/chat/completions</code>.
+				</span>
+			</label>
+			<label>
+				<span class="lbl">Token env var</span>
+				<input bind:value={oaiCompatTokenEnvVar} placeholder="FINN_OPENAI_COMPAT_API_KEY" />
+				<span class="hint">
+					Name of the env var holding the bearer token. The token itself is read at
+					connector-call time from <code>~/finn-data/secrets/.env</code>; never stored in the DB.
+					Use a backend-specific name (e.g. <code>FINN_WINTERMUTE_API_KEY</code>) when running
+					more than one openai-compatible agent.
+				</span>
+			</label>
+			<label>
+				<span class="lbl">Model hint</span>
+				<input bind:value={oaiCompatModelHint} placeholder="default" />
+				<span class="hint">
+					Value sent in the OpenAI <code>model</code> body field. Backends that
+					ignore the field (e.g. Wintermute) work fine with <code>default</code>;
+					backends that route on <code>model</code> need the backend-specific id.
 				</span>
 			</label>
 		</fieldset>
