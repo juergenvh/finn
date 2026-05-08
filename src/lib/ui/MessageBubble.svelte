@@ -325,7 +325,7 @@
 			Consolas,
 			'DejaVu Sans Mono',
 			monospace;
-		font-size: 0.875rem;
+		font-size: 0.8rem;
 		line-height: 1.45;
 	}
 
