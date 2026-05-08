@@ -27,27 +27,57 @@
 		onSetHidden
 	}: Props = $props();
 
-	let selectedTargets = $state<Set<string>>(new Set());
+	/**
+	 * Target selection for the approval picker, with a derived-with-
+	 * override pattern to avoid the race condition that previously
+	 * lost the original target list (issue #36).
+	 *
+	 * The previous implementation initialised `selectedTargets` to
+	 * an empty Set and filled it from `approval.targets` in an
+	 * `$effect`. Svelte 5 effects flush asynchronously in the
+	 * microtask queue, so a sufficiently fast click on "Approve"
+	 * — or a fresh `approval_created` arriving mid-mount — could
+	 * fire the click against the still-empty Set, causing the
+	 * server to write `targetedAgentIds: "[]"`, dispatch zero
+	 * relays, and emit a `routed` approval with no targets. The
+	 * UI then could not render the "routed to ..." sub-line
+	 * because `targets.length > 0` was false.
+	 *
+	 * `effectiveTargets` derives synchronously from `approval.targets`,
+	 * so the click always sees the canonical default. `userOverride`
+	 * takes precedence only when the user actively toggles, so manual
+	 * deselection still works.
+	 */
+	let userOverride = $state<Set<string> | null>(null);
 	let rejectReason = $state('');
 	let showRejectReason = $state(false);
 
-	let initializedFor = '';
+	/** Reset the override when a different approval is bound to this
+	 * bubble (e.g. on initial mount, or if the same component instance
+	 * is reused for a different message). Without this, a user's
+	 * deselection on one approval would persist visually onto the next. */
+	let trackedApprovalId = '';
 	$effect(() => {
-		if (approval && approval.id !== initializedFor) {
-			selectedTargets = new Set(approval.targets);
-			initializedFor = approval.id;
+		const id = approval?.id ?? '';
+		if (id !== trackedApprovalId) {
+			userOverride = null;
+			trackedApprovalId = id;
 		}
 	});
 
+	const effectiveTargets = $derived(
+		userOverride ?? new Set(approval?.targets ?? [])
+	);
+
 	function toggleTarget(id: string) {
-		const next = new Set(selectedTargets);
+		const next = new Set(effectiveTargets);
 		if (next.has(id)) next.delete(id);
 		else next.add(id);
-		selectedTargets = next;
+		userOverride = next;
 	}
 
 	function approve() {
-		onDecide('approve', [...selectedTargets], '');
+		onDecide('approve', [...effectiveTargets], '');
 	}
 
 	function reject() {
@@ -130,7 +160,7 @@
 						<label class="target">
 							<input
 								type="checkbox"
-								checked={selectedTargets.has(m.id)}
+								checked={effectiveTargets.has(m.id)}
 								onchange={() => toggleTarget(m.id)}
 							/>
 							{m.name}
@@ -153,8 +183,8 @@
 					</div>
 				{:else}
 					<div class="actions">
-						<button class="approve" onclick={approve} disabled={selectedTargets.size === 0}>
-							approve → {selectedTargets.size} target{selectedTargets.size === 1 ? '' : 's'}
+						<button class="approve" onclick={approve} disabled={effectiveTargets.size === 0}>
+							approve → {effectiveTargets.size} target{effectiveTargets.size === 1 ? '' : 's'}
 						</button>
 						<button class="reject" onclick={reject}>reject</button>
 					</div>
