@@ -781,8 +781,10 @@
 				<div class="row-wrapper">
 					<div class="member-row">
 						<span class="dot" class:disabled={!a.enabled}></span>
-						{a.name}
-						<span class="connector">{a.connectorType}</span>
+						<div class="agent-id">
+							<span class="agent-name">{a.name}</span>
+							<span class="connector">{a.connectorType}</span>
+						</div>
 					</div>
 					<button class="row-menu-btn" title="actions" onclick={() => toggleMenu(`ag:${a.id}`)}>⋯</button>
 					{#if openMenu === `ag:${a.id}`}
@@ -1158,10 +1160,26 @@
 	.dot.disabled {
 		background: #555;
 	}
+	/**
+	 * Two-line agent row: name on top, connector type underneath in
+	 * a smaller, dimmer style. The previous single-line layout used
+	 * `margin-left: auto` to right-align the connector, which wrapped
+	 * ugly for the longer types (`anthropic-stub`, `openai-compatible`)
+	 * because the row had no width budget left for them.
+	 */
+	.agent-id {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		line-height: 1.15;
+		min-width: 0;
+	}
+	.agent-name {
+		font-size: 0.9rem;
+	}
 	.connector {
-		color: #555;
-		font-size: 0.75rem;
-		margin-left: auto;
+		color: #64748b;
+		font-size: 0.7rem;
 	}
 
 	.filter-row {
