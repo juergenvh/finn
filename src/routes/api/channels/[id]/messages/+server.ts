@@ -16,6 +16,13 @@
  * `before` wins (paginating older history is a deliberate user
  * action).
  *
+ * Visibility: groomed (hidden_at != NULL) messages are **included**
+ * in the response (issue #34). The channel-view UI applies the
+ * 'show groomed' toggle client-side; the server fetch always
+ * returns the full slice so toggling does not require a refetch.
+ * The protocol viewer (audit surface) reads through a different
+ * path (src/lib/server/protocol.ts) and is unaffected.
+ *
  * Result is always oldest-first.
  */
 
@@ -33,10 +40,14 @@ export const GET: RequestHandler = async ({ params, url }) => {
 
 	if (budgetRaw && !before) {
 		const budgetKb = Math.min(Math.max(Number(budgetRaw), 1), 4096);
-		const { rows, hasMore } = recentMessagesByBudget(params.id, budgetKb * 1024);
+		const { rows, hasMore } = recentMessagesByBudget(
+			params.id,
+			budgetKb * 1024,
+			'all'
+		);
 		return json({ messages: rows, has_more: hasMore });
 	}
 
-	const rows = recentMessages(params.id, limit, before);
+	const rows = recentMessages(params.id, limit, before, 'all');
 	return json({ messages: rows });
 };
