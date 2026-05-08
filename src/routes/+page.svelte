@@ -103,7 +103,7 @@
 	let editAgentData = $state<{
 		id: string;
 		name: string;
-		connectorType: 'openclaw' | 'anthropic-stub';
+		connectorType: 'openclaw' | 'openai-compatible' | 'anthropic-stub';
 		enabled: boolean;
 		config: Record<string, unknown>;
 	} | null>(null);

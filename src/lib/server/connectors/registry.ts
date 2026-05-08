@@ -26,6 +26,7 @@ import { agents, channelMembers, channels } from '../db/schema.ts';
 import { parseAgentConfig } from '../db/agent-config.ts';
 import { extractMentions, resolveMentionedAgents } from '../mentions.ts';
 import { openclawConnector } from './openclaw.ts';
+import { openAICompatibleConnector } from './openai-compatible.ts';
 import { anthropicStubConnector } from './anthropic-stub.ts';
 
 export type DispatchedReply = {
@@ -106,6 +107,9 @@ async function callConnector(
 
 	if (config.connector_type === 'openclaw') {
 		return openclawConnector.send({ channelId, body, config });
+	}
+	if (config.connector_type === 'openai-compatible') {
+		return openAICompatibleConnector.send({ channelId, body, config });
 	}
 	if (config.connector_type === 'anthropic-stub') {
 		return anthropicStubConnector.send({ channelId, body, config });

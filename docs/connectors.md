@@ -1,19 +1,20 @@
 # finn — connectors and providers
 
 Each agent in finn is bound to one **connector** that knows how to
-turn an inbound message into a reply. Today there are two connector
-types in the codebase:
+turn an inbound message into a reply. Today there are three
+connector types in the codebase:
 
-| Connector type    | What it does                                              | Use it for                                    |
-| ----------------- | --------------------------------------------------------- | --------------------------------------------- |
-| `openclaw`        | POSTs to an OpenClaw Gateway's OpenAI-compatible endpoint | The default path. Routes through OpenClaw to any provider OpenClaw is configured for (Anthropic, Ollama, OpenAI, …). |
-| `anthropic-stub`  | Returns canned replies                                    | Dev/test only. Never talks to the network.    |
+| Connector type      | What it does                                                          | Use it for                                                                              |
+| ------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `openclaw`          | POSTs to an OpenClaw Gateway's OpenAI-compatible endpoint, with OpenClaw-specific headers (agent routing, scopes, session keys). | Talking to one or more agents living inside an OpenClaw gateway you control.            |
+| `openai-compatible` | POSTs to *any* `/chat/completions` endpoint that speaks vanilla OpenAI — no OpenClaw-specific headers. | Talking to a backend that's its own product (Wintermute, Open WebUI, vLLM, llama.cpp, …). |
+| `anthropic-stub`    | Returns canned replies.                                               | Dev/test only. Never talks to the network.                                              |
 
-The `openclaw` connector is the workhorse. By configuring **what
-goes in the `model` field**, you steer both *which OpenClaw agent*
-handles the turn and *which underlying model* runs the inference.
-finn itself does not need to know about the providers; OpenClaw
-resolves the model id and routes the call.
+The `openclaw` connector is the workhorse for OpenClaw-hosted
+agents. The `openai-compatible` connector covers everything else
+that speaks the OpenAI Chat Completions wire. Both are real,
+network-touching paths; the choice between them is which kind of
+backend you're talking to, not whether you trust OpenAI more.
 
 > A real `anthropic` connector (talking to Anthropic's API directly,
 > bypassing OpenClaw) is on the roadmap but not yet shipped. Until
@@ -22,7 +23,12 @@ resolves the model id and routes the call.
 
 ---
 
-## What goes in the `model` field
+## What goes in the `model` field (openclaw connector)
+
+*This section is openclaw-connector specific.* The
+`openai-compatible` connector has a separate `model_hint` field
+with different semantics; see [Scenario C](#scenario-c-openai-compatible-backend)
+for that one.
 
 The finn agent's `model` field is forwarded as-is to OpenClaw's
 OpenAI-compatible endpoint. OpenClaw treats this field as an
@@ -81,7 +87,7 @@ until it lands:
 
 ## Picking a scenario
 
-Three deployment shapes cover most needs. Pick the one that matches
+Four deployment shapes cover most needs. Pick the one that matches
 what you have, then jump to the matching section below.
 
 ### Scenario A — Anthropic Cloud via OpenClaw
@@ -134,7 +140,28 @@ the `model` field with a 400. The supported override path is the
 `x-openclaw-model` header, which finn does not yet expose in the
 UI.)*
 
-### Scenario C — dev/test with the stub
+### Scenario C — OpenAI-compatible backend (Wintermute, Open WebUI, …)
+
+You have a backend that exposes its own `/chat/completions`
+endpoint speaking the OpenAI Chat Completions wire format. Examples:
+Wintermute (see its `docs/OPENAI-COMPAT.md`), Open WebUI, LobeChat
+in proxy mode, vLLM, llama.cpp's HTTP server, anything else with an
+OpenAI-compatible facade.
+
+- finn agent: `connector_type: openai-compatible`
+- finn agent `base_url`: the backend's `/v1` URL
+  (e.g. `https://agent.your-domain.example/v1`).
+- finn agent `model_hint`: usually `default`. Backends that route
+  on the `model` field need the backend-specific id.
+
+This is a *thinner* path than `openclaw`: no OpenClaw-specific
+headers, no agent routing, no session-key scheme. Conversation
+continuity rides on OpenAI's standard `user` body field, set to the
+finn channel id; backends that pin per-`user` sessions (Wintermute
+does) get channel-scoped state for free, backends that don't simply
+behave statelessly per turn.
+
+### Scenario D — dev/test with the stub
 
 You want to try the UI, the approval flow, or the protocol viewer
 without paying for tokens or installing a model server. Use the
@@ -370,7 +397,104 @@ itself.
 
 ---
 
-## Scenario C — dev/test stub
+## Scenario C — OpenAI-compatible backend
+
+### Prerequisites
+
+- A backend reachable over the network that exposes
+  `POST /chat/completions` with OpenAI's wire format. Wintermute's
+  `/v1/*` adapter is the reference implementation; the upstream
+  contract is in its `docs/OPENAI-COMPAT.md`.
+- A bearer token for the backend (or a way to disable auth on it,
+  e.g. behind a private network).
+
+### 1. Verify the backend speaks the wire
+
+Before touching finn, smoke-test the backend directly:
+
+```bash
+curl -sS https://agent.your-domain.example/v1/models \
+  -H 'Authorization: Bearer ***'
+# expect: { "object": "list", "data": [ ... ] }
+
+curl -sS https://agent.your-domain.example/v1/chat/completions \
+  -H 'Authorization: Bearer ***' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "default",
+    "messages": [{"role": "user", "content": "Reply with exactly: pong"}]
+  }'
+# expect: a chat.completion JSON with content "pong" (or close).
+```
+
+If either of these fails, fix it backend-side first. finn cannot
+make a non-compliant backend look compliant.
+
+### 2. Configure the finn agent
+
+In the agent CRUD UI (or seed file), set:
+
+- `connector_type`: `openai-compatible`
+- `base_url`: the backend's `/v1` URL.
+- `token_env_var`: a backend-specific name, e.g.
+  `FINN_WINTERMUTE_API_KEY`. The token itself goes into
+  `~/finn-data/secrets/.env`; **do not put it in the DB**.
+- `model_hint`: `default` for backends that ignore the `model`
+  field (Wintermute), or the backend-specific id for backends that
+  route on it.
+
+### 3. Smoke test
+
+Send any user message in a channel that has the agent as a member.
+The reply should arrive within a second or two for cloud-backed
+backends; local-model backends may take 10–30s on first request as
+the model loads.
+
+If you get `openai-compatible 401`, the token env var is missing or
+wrong; check `~/finn-data/secrets/.env` and restart finn.
+
+### How this differs from the openclaw connector
+
+finn sends:
+
+```http
+POST <base_url>/chat/completions
+Authorization: Bearer ***
+Content-Type: application/json
+
+{
+  "model": "<model_hint>",
+  "user":  "<finn channel id>",
+  "messages": [...],
+  "stream": false
+}
+```
+
+No `x-openclaw-scopes`, no `x-openclaw-session-key`, no `x-openclaw-agent-id`.
+The backend gets a vanilla OpenAI request and is free to handle it
+as it sees fit. Conversation continuity is the OpenAI-standard
+`user` field; per-channel scoping happens because finn channel ids
+are stable and unique.
+
+### Worked example: pointing finn at Wintermute
+
+Wintermute exposes its OpenAI-compatible adapter behind a TLS
+reverse proxy (see Wintermute's `docs/OPENAI-COMPAT.md` for the
+backend-side setup). On the finn side:
+
+- `base_url`: `https://agent.your-domain.example/v1`
+- `token_env_var`: `FINN_WINTERMUTE_API_KEY` (with the actual
+  token in `~/finn-data/secrets/.env`).
+- `model_hint`: `default` (Wintermute ignores the `model` field).
+
+Make the agent a member of a channel and post a message. Wintermute
+sees the request as a `chat.completion` from `user: <channel-id>`
+and maps that to its own `conversation_id`, so each finn channel
+gets its own continuity scope on Wintermute's side.
+
+---
+
+## Scenario D — dev/test stub
 
 The `anthropic-stub` connector returns canned replies based on the
 inbound message. It never makes a network call. Use it when:
@@ -390,14 +514,16 @@ There is intentionally no setup. That's the point.
 
 ## Provider matrix (current state)
 
-| Provider                | Connector path                | Status     | Notes                                 |
-| ----------------------- | ----------------------------- | ---------- | ------------------------------------- |
-| Anthropic (Claude)      | `openclaw` → OpenClaw → Anthropic | ✅ shipped | Recommended primary path              |
-| Ollama local (Mac/LAN)  | `openclaw` → OpenClaw → Ollama    | ✅ shipped | Privacy / offline / hardware-rich     |
-| OpenAI (GPT-x)          | `openclaw` → OpenClaw → OpenAI    | ✅ shipped *if OpenClaw has the key* | Same shape as Anthropic               |
-| Stub (dev/test)         | `anthropic-stub`              | ✅ shipped | No network                            |
-| Anthropic direct        | `anthropic` (planned)         | 🟡 planned | Bypasses OpenClaw                     |
-| Ollama direct           | `ollama` (planned)            | 🟡 planned | For container-on-host with no gateway |
+| Provider                          | Connector path                              | Status     | Notes                                                        |
+| --------------------------------- | ------------------------------------------- | ---------- | ------------------------------------------------------------ |
+| Anthropic (Claude) via OpenClaw   | `openclaw` → OpenClaw → Anthropic            | ✅ shipped | Recommended primary path for OpenClaw-hosted agents.         |
+| Ollama local via OpenClaw         | `openclaw` → OpenClaw → Ollama               | ✅ shipped | Privacy / offline / hardware-rich, OpenClaw-mediated.        |
+| OpenAI (GPT-x) via OpenClaw       | `openclaw` → OpenClaw → OpenAI               | ✅ shipped *if OpenClaw has the key* | Same shape as Anthropic.                  |
+| Wintermute (OpenAI-compat)        | `openai-compatible` → Wintermute            | ✅ shipped | Wintermute's own `/v1/*` adapter; see its `docs/OPENAI-COMPAT.md`. |
+| Other OpenAI-compat backends      | `openai-compatible` → Open WebUI / vLLM / … | ✅ shipped *should be* | Same wire as Wintermute; backend-specific config differs.    |
+| Stub (dev/test)                   | `anthropic-stub`                            | ✅ shipped | No network.                                                  |
+| Anthropic direct                  | `anthropic` (planned)                       | 🟡 planned | Bypasses OpenClaw.                                           |
+| Ollama direct                     | `ollama` (planned)                          | 🟡 planned | For container-on-host with no gateway.                       |
 
 "Direct" connectors are deferred; the OpenClaw-mediated path covers
 the same use cases today, and the indirection is what gives you tool
