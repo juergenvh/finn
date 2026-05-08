@@ -26,7 +26,8 @@ docs/
     ├── 0008-globalthis-singleton-for-vite-ws-bridge.md
     ├── 0009-log-surface-v1.md
     ├── 0010-protocol-viewer.md
-    └── 0011-channel-view-kb-budget.md
+    ├── 0011-channel-view-kb-budget.md
+    └── 0012-agent-aware-session-key.md
 ```
 
 ## Decisions (ADRs)
@@ -60,6 +61,7 @@ across the project (not per-area).
 | 0009 | Log/transcript surface, v1 scope and shape             | pagination, search, filter, export, and mention-autocomplete choices    |
 | 0010 | Protocol viewer architecture                           | separate route, URL-state filters, cursor pagination, audit defaults    |
 | 0011 | Initial-load KB budget for the channel view            | bytes (not rows or hours), 200 KB default, when to revisit              |
+| 0012 | Agent-aware session-key format                         | encode the agent into the session-key so multi-agent routing actually works |
 
 ## Setup guides
 

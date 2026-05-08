@@ -10,11 +10,32 @@
  *   mode harmlessly ignore it (transitional posture).
  *
  * Session continuity:
- *   See docs/decisions/0002-session-key-format.md. Each finn channel
- *   maps to one stable OpenClaw agent session via the
- *   `x-openclaw-session-key: finn:<channel_id>` header. Without this,
- *   every relayed turn would land in a fresh agent session and the
- *   agent would re-load its memory on every message.
+ *   See docs/decisions/0002-session-key-format.md (original) and
+ *   docs/decisions/0012-agent-aware-session-key.md (current).
+ *
+ *   The session-key shape depends on whether the connector's
+ *   `model` field names a specific agent:
+ *
+ *     - `model: "openclaw"` (or `"openclaw/default"`)
+ *       → send `finn:<channel_id>` (ADR-0002's original shape).
+ *         The gateway wraps it as `agent:<resolved-default>:finn:<channel_id>`
+ *         using whatever default-agent id is currently configured.
+ *         This keeps continuity stable across renames of the
+ *         default-agent id and matches the gateway's stateful
+ *         session store.
+ *
+ *     - `model: "openclaw/<agentId>"`
+ *       → send `agent:<agentId>:finn:<channel_id>`. The explicit
+ *         `agent:<agentId>:` prefix is what the gateway's session-
+ *         key parser (`parseAgentSessionKey()` upstream) recognises
+ *         and uses to scope the session to that agent. Without it,
+ *         the gateway resolves the agent before the session lookup
+ *         and the multi-agent case breaks: an existing
+ *         `agent:<otherAgent>:finn:<channel_id>` session captures
+ *         the call regardless of the `model` field.
+ *
+ *   In both cases, each (agent, finn channel) pair maps to one
+ *   stable OpenClaw-side session.
  *
  * Configuration:
  *   The connector receives an OpenclawConfig object (see
@@ -44,13 +65,58 @@ const FINN_SCOPES = ['operator.read', 'operator.write'].join(' ');
 
 /**
  * Prefix for OpenClaw session keys created by finn.
- * MUST stay in sync with docs/decisions/0002-session-key-format.md.
+ * MUST stay in sync with docs/decisions/0002-session-key-format.md
+ * and docs/decisions/0012-agent-aware-session-key.md.
  * Changing this would orphan all existing OpenClaw-side sessions for
  * existing finn channels.
  */
 const FINN_SESSION_PREFIX = 'finn';
 
-function sessionKeyFor(channelId: string): string {
+/**
+ * Extract the explicit agent id from the OpenAI `model` field, if any.
+ *
+ * Returns:
+ *   - `null` for `openclaw`, `openclaw/default`, empty, or unrecognised
+ *     values — caller should treat this as "the gateway picks the
+ *     default agent" and emit a non-prefixed session-key.
+ *   - The `<agentId>` substring for `openclaw/<agentId>`.
+ *
+ * The gateway also accepts the compatibility alias forms `openclaw:<id>`
+ * and `agent:<id>` (see upstream OpenAI HTTP API docs); we recognise
+ * those too so the same session-key derivation works for ports of
+ * other tooling.
+ */
+function explicitAgentIdFromModel(model: string): string | null {
+	const trimmed = (model ?? '').trim();
+	if (trimmed === '' || trimmed === 'openclaw' || trimmed === 'openclaw/default') {
+		return null;
+	}
+	const match =
+		trimmed.match(/^openclaw[:/](?<id>[a-z0-9][a-z0-9_-]{0,63})$/i) ??
+		trimmed.match(/^agent:(?<id>[a-z0-9][a-z0-9_-]{0,63})$/i);
+	const id = match?.groups?.id;
+	if (!id) return null;
+	if (id.toLowerCase() === 'default') return null;
+	return id;
+}
+
+/**
+ * Build the session-key string sent to OpenClaw.
+ *
+ * Two shapes, depending on whether the `model` field names a specific
+ * agent (see file-level docblock for the rationale):
+ *
+ *   - explicit agent: `agent:<agentId>:finn:<channel_id>` — the
+ *     `agent:<agentId>:` prefix is what the gateway's session-key
+ *     parser recognises and uses to scope the session.
+ *   - default agent: `finn:<channel_id>` — ADR-0002's original
+ *     shape; the gateway wraps it with the resolved default-agent
+ *     id at session-store time.
+ */
+function sessionKeyFor(explicitAgentId: string | null, channelId: string): string {
+	if (explicitAgentId) {
+		return `agent:${explicitAgentId}:${FINN_SESSION_PREFIX}:${channelId}`;
+	}
 	return `${FINN_SESSION_PREFIX}:${channelId}`;
 }
 
@@ -86,15 +152,19 @@ async function send(args: OpenclawSendArgs): Promise<string> {
 
 	const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
 
+	const explicitAgentId = explicitAgentIdFromModel(model);
+
 	const headers: Record<string, string> = {
 		'content-type': 'application/json',
 		// See ADR-0001. Always declare the scope, even when calling a
 		// gateway that will ignore the header — keeps the contract
 		// uniform across gateway auth modes.
 		'x-openclaw-scopes': FINN_SCOPES,
-		// See ADR-0002. Pin one OpenClaw-side session per finn channel
-		// so that the agent perceives a continuous conversation.
-		'x-openclaw-session-key': sessionKeyFor(args.channelId)
+		// See ADR-0002 + ADR-0012. Pin one OpenClaw-side session per
+		// (agent, finn channel) pair so each agent has its own continuous
+		// conversation per channel and switching the agent on a finn
+		// channel does not get hijacked by an existing session binding.
+		'x-openclaw-session-key': sessionKeyFor(explicitAgentId, args.channelId)
 	};
 	if (apiKey) {
 		headers.authorization = `Bearer ${apiKey}`;
