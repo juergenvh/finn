@@ -13,6 +13,7 @@ docs/
 ├── contributing.md        ← branch / PR workflow (ADR-0006)
 ├── setup.md               ← single-machine setup walkthrough
 ├── setup-mac.md           ← Mac host + remote VM gateway walkthrough
+├── connectors.md          ← provider scenarios (Anthropic, local Ollama, stub)
 ├── lessons.md             ← things we got wrong and what we changed
 └── decisions/             ← Architecture Decision Records (ADRs)
     ├── 0001-openclaw-connector-auth.md
@@ -66,9 +67,12 @@ across the project (not per-area).
 | ------------------- | ------------------------------------------------------ |
 | `setup.md`          | finn and OpenClaw run on the same host                 |
 | `setup-mac.md`      | finn on macOS, OpenClaw in a UTM VM (two-machine)      |
+| `connectors.md`     | picking a provider (Anthropic Cloud, local Ollama, …) and wiring it through the OpenClaw connector |
 
-The two guides are intentionally redundant where they need to be —
-pick the one that matches your topology and follow it end to end.
+The setup guides are intentionally redundant where they need to be —
+pick the one that matches your topology. `connectors.md` is
+orthogonal: read it after one of the setup guides to choose what
+your agents actually talk to.
 
 ## Lessons
 
