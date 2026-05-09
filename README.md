@@ -380,8 +380,11 @@ In ascending order of integration weight:
    targeted approval, recursive approval for relayed replies that
    mention yet another agent.
 5. **Channel + agent CRUD UI** ✓ — in-browser create / edit /
-   disable / archive via modal forms. Live cross-tab sync via
-   `state_changed` WS events. ADR-0007.
+   disable / archive via modal forms. Channel-create and -edit
+   member selection uses an email-client-style chip input
+   (filter-as-you-type, Backspace-to-remove, ARIA combobox).
+   Live cross-tab sync via `state_changed` WS events. ADR-0007;
+   chip-input PR #61.
 6. **Log surface** ✓ — backwards pagination ('Load older'),
    per-channel substring search, sender / system / rejected-
    approval filters in the sidebar, full-channel markdown export
@@ -562,6 +565,9 @@ you reach for every day. Marker reached on 2026-05-09. See
   loop defences, capability probe, role labels); implementation
   staged into three PRs.
 
+*(#26 — channel-create member selection chip UI — closed via
+PR #61.)*
+
 **Phase 3 — nice-to-have / discovery:**
 
 * **#6** Discovery: where session memory lives
@@ -572,7 +578,8 @@ you reach for every day. Marker reached on 2026-05-09. See
 * **#25** Bug: cannot reuse channel name after archive.
 * **#30** Discovery: protocol-viewer audit-aware channel picker
   (archived channels missing from the filter).
-* **#49** Discovery: finn artwork in sidebar brand area.
+
+*(#49 — finn artwork in sidebar brand area — closed via PR #62.)*
 
 **Unphased / discovery:**
 
@@ -604,6 +611,13 @@ Follow-ups under earlier issues:
 * **#1** Rich-rendering for message bubbles — ADR-0016, PR #58.
   Closes phase 1.
 * **#52** Manual message forwarding — ADR-0014 (PRs #53, #54).
+* **#26** Channel-create member selection chip UI — PR #61
+  (no ADR; UI-component refactor without trust-model
+  implications, design pinned in the issue's discovery
+  comment).
+* **#49** Sidebar artwork — PR #62 (visual polish; the WebP
+  asset lives in `static/`, exported from the README image at
+  2× display size for retina).
 * **#23**, **#27**, **#34**, **#36** — see prior daily logs.
 * `#channel` autocomplete in the composer.
 * `?channel=<id>` query-param handler at `/` so the protocol
