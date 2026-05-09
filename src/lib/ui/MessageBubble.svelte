@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import type { AgentInfo, ApprovalSnapshot, TokenUsage } from './types';
 
 	type Props = {
@@ -69,9 +70,25 @@
 		forwardTargets = next;
 	}
 
-	function openForward() {
+	/**
+	 * Reference to this bubble's root element. Used to scroll the
+	 * forward picker into view after it expands; without this the
+	 * picker can land below the viewport for bubbles that sit
+	 * higher in the channel (no length change in the message list,
+	 * so the parent's auto-scroll effect doesn't fire).
+	 */
+	let bubbleEl: HTMLDivElement | null = $state(null);
+
+	async function openForward() {
 		forwardTargets = new Set();
 		showForwardPicker = true;
+		// Wait for the picker to render, then nudge the bubble into
+		// the viewport. `block: 'end'` keeps the picker's confirm
+		// button visible; for bubbles already fully on-screen the
+		// browser is a no-op. Smooth so the motion is obvious to the
+		// user (their click *is* what moved the page).
+		await tick();
+		bubbleEl?.scrollIntoView({ block: 'end', behavior: 'smooth' });
 	}
 
 	function confirmForward() {
@@ -217,6 +234,7 @@
 
 <div class="row {sender}">
 	<div
+		bind:this={bubbleEl}
 		class="bubble {sender}"
 		class:has-approval={!!approval}
 		class:status-pending={statusBadge === 'pending'}
