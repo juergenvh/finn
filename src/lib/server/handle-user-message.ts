@@ -3,8 +3,8 @@
  *
  * Streams broadcasts via the `emit` callback as soon as each piece is
  * ready:
- *   1. Persist the user turn → emit it (so the user's bubble appears
- *      immediately, before any connector latency).
+ *   1. Persist the user turn → emit it as a `message` event (the
+ *      user message is not streamed; it arrives whole from the form).
  *   2. Stream-dispatch to channel-member agents (narrowed to mentioned
  *      agents if the body contains `@-mentions`, see issue #27).
  *      Each agent emits its own
@@ -12,12 +12,10 @@
  *      (ADR-0013); per-agent dispatchers run in parallel so the user
  *      sees fast agents replying while slower ones are still
  *      streaming.
- *   3. On `message_end`, persist the agent reply and (phase 2a only)
- *      additionally emit a legacy `message` event so clients that do
- *      not yet handle the streaming lifecycle keep working unchanged.
- *      Phase 2b removes the legacy emit.
- *   4. For agent replies that mention other agents, create an
- *      approval row and emit `approval_created`.
+ *   3. On `message_end`, persist the agent reply and create an
+ *      approval row when the reply mentions other agents.
+ *      `message_error` paths are surfaced via the dispatcher's
+ *      per-agent emit; no row is written on failure.
  *
  * Per ADR-0005: user → agent never needs approval. Agent → agent
  * always does. Agent → user (no `@-mention` to other agents) is
@@ -30,15 +28,14 @@ import { streamUserMessage } from './connectors/registry.ts';
 import { resolveMentionedAgents } from './mentions.ts';
 import { createPendingApproval, targetsOf } from './approvals.ts';
 
-function messageBroadcast(
+function userMessageBroadcast(
 	row: { id: string; channelId: string; body: string; createdAt: number },
-	sender: 'user' | 'agent' | 'system',
-	senderId: string | null
+	senderId: string
 ): BroadcastMessage {
 	return {
 		type: 'message',
 		channel_id: row.channelId,
-		sender,
+		sender: 'user',
 		sender_id: senderId,
 		body: row.body,
 		ts: row.createdAt,
@@ -51,7 +48,7 @@ export async function handleUserMessage(
 	emit: Emit
 ): Promise<void> {
 	const userRow = recordUserMessage({ channelId: args.channel_id, body: args.body });
-	emit(messageBroadcast(userRow, 'user', userRow.senderId ?? 'jurgen'));
+	emit(userMessageBroadcast(userRow, userRow.senderId ?? 'jurgen'));
 
 	let result: Awaited<ReturnType<typeof streamUserMessage>>;
 	try {
@@ -89,29 +86,23 @@ export async function handleUserMessage(
 
 	for (const reply of result.replies) {
 		if ('error' in reply) {
-			// streamUserMessage already emitted message_error for the
-			// per-agent path. Surface the error to legacy-only clients
-			// via the existing system-event channel as well, mirroring
-			// the previous behaviour. Phase 2b drops the system event
-			// duplicate once the client handles message_error.
-			emit({ type: 'system', body: `agent ${reply.agentId} error: ${reply.error}` });
+			// `streamUserMessage` already emitted `message_error` for
+			// the per-agent path. The client handles it directly
+			// (failed-bubble UX); no DB row is written and no
+			// additional system event is needed.
 			continue;
 		}
 
 		// Persist the completed stream as one row, using the message id
-		// the dispatcher already announced via message_start.
+		// the dispatcher already announced via `message_start`. The
+		// client reconciles its in-flight buffer on `message_end`; no
+		// legacy `message` event is emitted (phase 2b).
 		const agentRow = recordAgentMessage({
 			id: reply.messageId,
 			channelId: args.channel_id,
 			body: reply.body,
 			agentId: reply.agentId
 		});
-
-		// Phase 2a compatibility emit: clients that do not yet know
-		// the message_start / message_delta / message_end lifecycle
-		// still receive a legacy `message` event with the final body
-		// and stay functional. Phase 2b removes this line.
-		emit(messageBroadcast(agentRow, 'agent', reply.agentId));
 
 		// Mentions in the agent reply that resolve to OTHER agents in
 		// the channel become the default approval target set. The

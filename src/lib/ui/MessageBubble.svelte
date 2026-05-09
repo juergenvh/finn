@@ -6,6 +6,17 @@
 		senderName: string;
 		body: string;
 		ts: number;
+		/** True while the agent reply is mid-stream (between
+		 * `message_start` and `message_end`, ADR-0013). The bubble
+		 * shows a blinking cursor at the body's tail while this is
+		 * true. Default false for non-streaming senders (user, system,
+		 * historical messages from initial load). */
+		streaming?: boolean;
+		/** Set when the upstream stream failed mid-flight
+		 * (`message_error`). The bubble surfaces the error inline.
+		 * Mutually exclusive with `streaming` (an errored bubble is
+		 * no longer in flight). */
+		error?: string | null;
 		approval?: ApprovalSnapshot;
 		members: AgentInfo[];
 		excludeAgentIds?: string[];
@@ -19,6 +30,8 @@
 		senderName,
 		body,
 		ts,
+		streaming = false,
+		error = null,
 		approval,
 		members,
 		excludeAgentIds = [],
@@ -115,6 +128,8 @@
 		class:status-approved={statusBadge === 'approved'}
 		class:status-routed={statusBadge === 'routed'}
 		class:status-rejected={statusBadge === 'rejected'}
+		class:streaming
+		class:errored={!!error}
 		class:hidden-msg={hidden}
 	>
 		{#if onSetHidden}
@@ -150,7 +165,14 @@
 			</div>
 		{/if}
 
-		<div class="body">{body}</div>
+		<div class="body">
+			{#if body}{body}{/if}{#if streaming}<span class="cursor" aria-hidden="true">▌</span>{/if}
+		</div>
+		{#if error}
+			<div class="error-line" role="alert">
+				<span class="error-icon" aria-hidden="true">⚠</span> stream failed: {error}
+			</div>
+		{/if}
 
 		{#if approval && approval.status === 'pending'}
 			<div class="approval">
@@ -280,6 +302,48 @@
 	}
 	.bubble.status-rejected .who {
 		color: #6b6b70;
+	}
+
+	.bubble.streaming {
+		/* Subtle in-flight cue beyond the cursor itself. The body's
+		 * leftmost edge gets a faint accent so a streaming bubble
+		 * is visually distinct from a settled one even while no new
+		 * tokens are being appended. */
+		border-left-color: #38bdf8;
+	}
+	.bubble.errored {
+		border-left-color: #b91c1c;
+		background: #1f1416;
+	}
+
+	.cursor {
+		/* Inline tail-of-text cursor that blinks while a message is
+		 * mid-stream. Width matches a monospace half-block so it
+		 * doesn't reflow the body when streaming flips off. */
+		display: inline-block;
+		margin-left: 1px;
+		color: #94a3b8;
+		animation: cursor-blink 1.05s steps(2, end) infinite;
+	}
+	@keyframes cursor-blink {
+		0%, 49% { opacity: 1; }
+		50%, 100% { opacity: 0; }
+	}
+
+	.error-line {
+		margin-top: 0.5rem;
+		padding: 0.4rem 0.55rem;
+		border-radius: 4px;
+		background: #2a1416;
+		color: #fecaca;
+		font-size: 0.78rem;
+		line-height: 1.4;
+		display: flex;
+		gap: 0.4rem;
+		align-items: flex-start;
+	}
+	.error-icon {
+		color: #fca5a5;
 	}
 
 	.header {
