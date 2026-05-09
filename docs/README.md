@@ -28,7 +28,8 @@ docs/
     ├── 0010-protocol-viewer.md
     ├── 0011-channel-view-kb-budget.md
     ├── 0012-agent-aware-session-key.md
-    └── 0013-streaming-and-sequencing.md
+    ├── 0013-streaming-and-sequencing.md
+    └── 0014-user-triggered-forwarding.md
 ```
 
 ## Decisions (ADRs)
@@ -63,7 +64,8 @@ across the project (not per-area).
 | 0010 | Protocol viewer architecture                           | separate route, URL-state filters, cursor pagination, audit defaults    |
 | 0011 | Initial-load KB budget for the channel view            | bytes (not rows or hours), 200 KB default, when to revisit              |
 | 0012 | Agent-aware session-key format                         | encode the agent into the session-key so multi-agent routing actually works |
-| 0013 | Token-streaming + reply-sequencing                     | three-event lifecycle (start/delta/end), parallel async iteration in dispatcher, plain-while-streaming render. Status: draft until phase 2 lands. |
+| 0013 | Token-streaming + reply-sequencing                     | three-event lifecycle (start/delta/end), parallel async iteration in dispatcher, plain-while-streaming render. Accepted; phases 1–3 + sweep all shipped. |
+| 0014 | User-triggered forwarding                              | second legitimate routing form alongside `@-mention` approvals: ↗ on a bubble forwards verbatim to channel members, lands directly in `routed` status, no `pending` stage. ADR-0005's no-auto-approve invariant unchanged. |
 
 ## Setup guides
 

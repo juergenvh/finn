@@ -561,6 +561,15 @@ existed during the spike is gone — removed in the post-phase-3
 sweep once both dispatcher entry points consumed the streaming
 surface end-to-end.
 
+Both HTTP connectors send
+`stream_options: { include_usage: true }` on streaming requests
+(PR #51). Without that flag, OpenAI-shaped backends *do not*
+include the `usage` block in the SSE response — the stream
+ends right after the last content delta. Backends that honour
+the flag emit a final `choices: [], usage: {...}` frame just
+before `[DONE]`; backends that ignore it (Wintermute today)
+are unaffected, the footer stays hidden, no harm done.
+
 Backend reality (see ADR-0013 §"Backend streaming maturity"):
 
 - **OpenClaw → Anthropic**: real token-by-token (Anthropic SSE
@@ -583,6 +592,27 @@ The sequencing win applies even to backends that don't actually
 stream: per-recipient streams run in parallel, so a fast agent's
 bubble finishes while a slow agent's is still empty, and the
 slowest agent never blocks the rest of the channel.
+
+## Routing modes (where the connectors get called from)
+
+Four places in the server call into a connector. All of them
+drive the same per-agent streaming pipeline
+(`streamOneAgent` in `registry.ts`); they only differ in
+*which agents* are recipients and *what triggers the call*.
+
+| Trigger                              | Entry point          | Recipient set                                                  |
+| ------------------------------------ | -------------------- | -------------------------------------------------------------- |
+| User types a message in a channel    | `streamUserMessage`  | All enabled channel members, narrowed by `@-mentions` if any.  |
+| User approves a pending mention      | `streamToAgent` (×N) | The targets the user committed to in the approval picker.       |
+| User clicks ↗ forward on a bubble    | `streamToAgent` (×N) | The targets the user picked in the inline forward picker.       |
+| (Hypothetical) Internal scheduler    | n/a                   | None today; finn never calls connectors without a user trigger. |
+
+The approval flow (ADR-0005) gates the second row; the user-
+triggered forward (ADR-0014) is the second legitimate routing
+shape and skips the `pending` stage — the user's deliberate
+click *is* the human-in-the-loop. No autonomous /
+scheduler-driven path exists today; if it ever does, it gets
+its own ADR.
 
 ---
 

@@ -23,11 +23,13 @@ is structurally split into two surfaces:
   search, filter, and markdown export of the full message history
   including groomed rows.
 
-Rich-rendering / Markdown for message bodies, token-streaming +
-reply-sequencing, settings surface, and launchd integration are
-tracked as open issues; see §"Roadmap". Wintermute and any other
-OpenAI-compatible backend are reachable today via the
-`openai-compatible` connector type.
+Rich-rendering / Markdown for message bodies, settings surface,
+and launchd integration are tracked as open issues; see §"Roadmap".
+Token-streaming and per-message token-usage display landed in
+ADR-0013 phases 2–3 and issue #43. Manual message forwarding
+(↗ on a bubble routes it to picked agents directly, ADR-0014)
+is live. Wintermute and any other OpenAI-compatible backend
+are reachable via the `openai-compatible` connector type.
 
 ## What it is
 
@@ -218,7 +220,13 @@ Triggers:
   their message is already decided).
 * **Agent → user** (no `@-mention` to other agents): no approval.
 * **Agent → agent** (any `@-mention` of another channel member):
-  one approval row per such message.
+  one approval row per such message, status `pending`.
+* **User-triggered forward** (user clicks ↗ on an existing
+  bubble): the picked targets receive the body verbatim. The
+  user's deliberate click *is* the human-in-the-loop step; the
+  approval row lands directly in `routed` status. ADR-0014 has
+  the full rationale (forwarding is a second legitimate routing
+  shape, not a bypass of the gate).
 
 Each agent message bubble carries its approval state inline: status
 badge, target picker (pre-filled from `@-mentions`, user-overridable),
@@ -226,7 +234,8 @@ Approve / Reject buttons, optional reject reason. There is no
 separate approval inbox — the message is the unit of decision.
 
 Full rationale, sender experience, recursive approval semantics, and
-wire protocol: [`docs/decisions/0005-approval-flow.md`](docs/decisions/0005-approval-flow.md).
+wire protocol: [`docs/decisions/0005-approval-flow.md`](docs/decisions/0005-approval-flow.md);
+forwarding details in [`docs/decisions/0014-user-triggered-forwarding.md`](docs/decisions/0014-user-triggered-forwarding.md).
 
 ## Addressing model
 
@@ -247,22 +256,36 @@ user's choice in the approval UI is what actually routes.
 Inbound (client → server):
 
 ```ts
-{ type: 'user_message',    channel_id, body }
-{ type: 'approval_decide', approval_id, decision: 'approve'|'reject',
-                            targets?, reject_reason? }
+{ type: 'user_message',     channel_id, body }
+{ type: 'approval_decide',  approval_id, decision: 'approve'|'reject',
+                             targets?, reject_reason? }
+{ type: 'forward_message',  message_id, target_agent_ids: string[] }
 { type: 'ping' }
 ```
 
 Outbound (server → client, streamed via per-event broadcast):
 
 ```ts
-{ type: 'message',           channel_id, sender, sender_id, body, ts, id }
-{ type: 'approval_created',  approval, message_id }
-{ type: 'approval_updated',  approval }
-{ type: 'state_changed',     entity: 'channel'|'agent'|'channel_member'|'message',
-                              action: 'created'|'updated'|'deleted',
-                              id, extra? }
-{ type: 'system',            body }
+// User and system messages — single event, body arrives whole.
+{ type: 'message',          channel_id, sender, sender_id, body, ts, id }
+
+// Agent replies — four-event streaming lifecycle (ADR-0013).
+{ type: 'message_start',    id, channel_id, sender_id, ts }
+{ type: 'message_delta',    id, delta }
+{ type: 'message_end',      id, body, tokens? }      // tokens optional, issue #43
+{ type: 'message_error',    id, error }              // mutually exclusive with message_end
+
+// Approval lifecycle.
+{ type: 'approval_created', approval, message_id }   // for mention-approvals AND forwards
+{ type: 'approval_updated', approval }
+
+// Domain CRUD echo.
+{ type: 'state_changed',    entity: 'channel'|'agent'|'channel_member'|'message',
+                             action: 'created'|'updated'|'deleted',
+                             id, extra? }
+
+// Misc.
+{ type: 'system',           body }
 { type: 'pong' }
 ```
 
@@ -272,9 +295,12 @@ clients can update visibility without a full refetch. The
 protocol viewer at `/protocol` does not subscribe to live events
 — it is a snapshot surface (ADR-0010 §5).
 
-`message` events arrive as soon as each one is persisted, so the
-user's own bubble appears in milliseconds; agent replies arrive
-when their connector returns. `state_changed` notifies connected
+User-message `message` events arrive as soon as each one is
+persisted, so the user's own bubble appears in milliseconds.
+Agent replies stream as `message_start` → N × `message_delta`
+→ `message_end` (or `message_error`) so the channel sees per-
+recipient bubbles fill at their own pace, and the slowest agent
+never blocks the rest. `state_changed` notifies connected
 clients of CRUD changes (a channel renamed in one tab is reflected
 in another within a roundtrip). See `src/lib/server/ws/attach.ts`
 for the canonical schema.
@@ -375,11 +401,22 @@ In ascending order of integration weight:
     selector, only-rejected flag, cursor-paginated, markdown export
     of the current filter result. URL search-params are the filter
     source-of-truth. ADR-0010.
-12. **Streaming-capable connectors** ✓ — both `openclaw` and
-    `openai-compatible` connectors can consume OpenAI-style SSE
-    streams via the shared `sse-parser.ts` helper. The dispatcher
-    has not yet been switched to use them; that's the next phase
-    of issue #3 (ADR-0013).
+12. **End-to-end token streaming** ✓ — the dispatcher fans out
+    via `streamUserMessage` / `streamToAgent`, both driving the
+    per-agent `streamOneAgent` core that emits
+    `message_start`/`delta`/`end` (or `error`) over the WebSocket.
+    SSE parsing is in `sse-parser.ts`; per-message token usage
+    is captured from the upstream `usage` block when the backend
+    reports one and persisted as `messages.tokens_json`. ADR-0013
+    + issue #43.
+13. **User-triggered forwarding** ✓ — ↗ in a bubble's hover
+    toolbar relays the body verbatim to picked channel members,
+    landing directly in `routed` status; the user's deliberate
+    click *is* the human-in-the-loop step. ADR-0014.
+14. **Streaming status icon + token-count footer in bubbles** ✓
+    — ● streaming, ✓ done, ⚠ errored in the header;
+    `tokens: total (↓input, ↑output)` in the footer when the
+    backend reports usage. Issue #43.
 
 ## What this is **not** doing
 
@@ -387,11 +424,11 @@ In ascending order of integration weight:
   ADR (planned for when finn moves off the Mac+VM trust domain).
 * **Agent-to-agent direct connectors.** Everything goes through the
   UI. By design.
-* **Streaming responses.** Messages return whole. Token-streaming
-  is planned for the WebSocket-side once the rest of the data model
-  is stable.
 * **Files, images, voice.** Future ADRs.
-* **Cross-channel search.** Comes with the log viewer, later.
+* **Cross-channel search beyond the protocol viewer.** Today's
+  search lives at `/protocol`; an integrated cross-channel search
+  in the conversational view is a follow-up under the same
+  surface.
 
 ## Layout on disk
 
@@ -488,10 +525,10 @@ tool you reach for every day.
 **Phase 1 — daily-use blockers:**
 
 * **#1** Discovery: rich-rendering for message bubbles
-  (Markdown? something else?).
-* **#3** Token-streaming + reply-sequencing for assistant replies.
-  Phase 1 (connectors) shipped via PR #39; phase 2 (dispatcher
-  switch) is the next visible UX flip. ADR-0013.
+  (Markdown? something else?). The current bubble already plays
+  in monospace; this is the layer above. Carries an attached
+  scroll-discipline thread (auto-scroll vs late-arriving
+  approvals / markdown finalisation) since 2026-05-09.
 
 **Phase 2 — quality-of-life:**
 
@@ -501,6 +538,13 @@ tool you reach for every day.
   chips).
 * **#28** Per-channel toggle to auto-approve agent-to-agent
   mentions.
+* **#43** (open: footer-consistency follow-up) Token-usage
+  display — Part A (streaming status icon ●/✓/⚠) and Part B
+  (per-message token-count footer) both shipped (PRs #44, #50,
+  #51); the issue stays as the meta-thread until the
+  always-on-footer follow-up (commented in #1) lands.
+* **#46** Discovery: Multi-User with SSO and separate creds.
+  Strategic question, not a blocker.
 
 **Phase 3 — nice-to-have / discovery:**
 
@@ -512,6 +556,7 @@ tool you reach for every day.
 * **#25** Bug: cannot reuse channel name after archive.
 * **#30** Discovery: protocol-viewer audit-aware channel picker
   (archived channels missing from the filter).
+* **#49** Discovery: finn artwork in sidebar brand area.
 
 Follow-ups under earlier issues:
 
@@ -522,9 +567,13 @@ Follow-ups under earlier issues:
 * Server-side `~/finn-data/exports/` write alongside the
   browser download.
 
-Closed today (2026-05-08): #23 agent-aware session-keys (ADR-0012),
-#27 user-mention dispatch filtering, #34 groomed-filter server-side
-bug, #36 routed-to header race condition.
+**Closed since the last roadmap refresh** (2026-05-08–2026-05-09):
+
+* **#3** Token-streaming + reply-sequencing — ADR-0013 phases
+  1–3 + post-phase-3 sweep all shipped (PRs #39, #41, #42,
+  #45, #47).
+* **#52** Manual message forwarding — ADR-0014 (PRs #53, #54).
+* **#23**, **#27**, **#34**, **#36** — see prior daily logs.
 * `#channel` autocomplete in the composer.
 * `?channel=<id>` query-param handler at `/` so the protocol
   viewer's channel-pill links land on the right channel.
