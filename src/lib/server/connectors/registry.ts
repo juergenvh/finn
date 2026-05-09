@@ -63,16 +63,6 @@ export type StreamedDispatchedReply = {
 };
 
 /**
- * One completed agent reply produced by the non-streaming
- * `dispatchToAgent` path (approval-routing relay; ADR-0013 phase 3
- * will switch this to streaming too).
- */
-export type DispatchedReply = {
-	agentId: string;
-	body: string;
-};
-
-/**
  * Diagnostic info about how the dispatch interpreted the message body.
  * The caller uses this to surface a system event when the user's
  * mentions did not resolve to any channel-member agent.
@@ -147,33 +137,14 @@ function requireChannel(channelId: string): void {
 	}
 }
 
-async function callConnector(
-	agent: MemberAgent,
-	channelId: string,
-	body: string
-): Promise<string> {
-	if (ECHO) return `echo (${agent.name}): ${body}`;
-
-	const config = parseAgentConfig(agent.connectorType, agent.config);
-
-	if (config.connector_type === 'openclaw') {
-		return openclawConnector.send({ channelId, body, config });
-	}
-	if (config.connector_type === 'openai-compatible') {
-		return openAICompatibleConnector.send({ channelId, body, config });
-	}
-	if (config.connector_type === 'anthropic-stub') {
-		return anthropicStubConnector.send({ channelId, body, config });
-	}
-	throw new Error(`unknown connector_type for agent ${agent.id}: ${agent.connectorType}`);
-}
-
 /**
  * Resolve the per-connector streaming generator for an agent.
  *
- * `FINN_ECHO_ONLY=1` short-circuits to a single-chunk yield of the
- * canned echo body, mirroring the non-streaming `callConnector`
- * behaviour so test/dev environments don't need real backends.
+ * `FINN_ECHO_ONLY=1` short-circuits to a single-chunk yield of a
+ * canned echo body so test/dev environments don't need real
+ * backends. The dispatcher pipeline then drives the same
+ * `streamOneAgent` lifecycle around the canned chunk as it would
+ * around a real upstream stream.
  */
 function streamConnector(
 	agent: MemberAgent,

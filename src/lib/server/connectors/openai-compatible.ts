@@ -24,10 +24,11 @@
  * env-var-only secret storage; the same posture as the `openclaw`
  * connector applies here.
  *
- * Streaming is not yet exercised on this path. The connector requests
- * `stream: false` and consumes the JSON body. When finn grows real
- * progressive rendering (issue #3), both this and the `openclaw`
- * connector get streaming together.
+ * Streaming-only since ADR-0013 phases 2 + 3:
+ * This connector exposes `streamReply` only. The earlier
+ * non-streaming `send` path was removed once both dispatch entry
+ * points (`streamUserMessage`, `streamToAgent`) consumed the
+ * streaming surface end-to-end.
  */
 
 import type { OpenAICompatibleConfig } from '../db/agent-config.ts';
@@ -38,78 +39,21 @@ type ChatMessage = {
 	content: string;
 };
 
-type ChatCompletionResponse = {
-	choices: Array<{
-		message?: { content?: string };
-	}>;
-};
-
 const SYSTEM_PROMPT =
 	"You are an assistant being addressed through 'finn', a multi-agent " +
 	'chat router. Reply concisely; the user is testing channel plumbing.';
 
-export type OpenAICompatibleSendArgs = {
+export type OpenAICompatibleStreamArgs = {
 	channelId: string;
 	body: string;
 	config: OpenAICompatibleConfig;
 };
 
-async function send(args: OpenAICompatibleSendArgs): Promise<string> {
-	const {
-		base_url: baseUrl,
-		model_hint: modelHint,
-		token_env_var: tokenEnvVar
-	} = args.config;
-	const apiKey = process.env[tokenEnvVar] ?? '';
-
-	const messages: ChatMessage[] = [
-		{ role: 'system', content: SYSTEM_PROMPT },
-		{ role: 'user', content: args.body }
-	];
-
-	const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
-
-	const headers: Record<string, string> = {
-		'content-type': 'application/json'
-	};
-	if (apiKey) {
-		headers.authorization = `Bearer ${apiKey}`;
-	}
-
-	const requestBody = {
-		model: modelHint,
-		messages,
-		// Standard OpenAI continuity hint. Backends that pin per-user
-		// sessions (Wintermute) use this to scope conversation state;
-		// backends that ignore it simply don't, and we keep parity
-		// with how a vanilla OpenAI client would be used.
-		user: args.channelId,
-		stream: false
-	};
-
-	const res = await fetch(url, {
-		method: 'POST',
-		headers,
-		body: JSON.stringify(requestBody)
-	});
-
-	if (!res.ok) {
-		const text = await res.text().catch(() => '');
-		throw new Error(`openai-compatible ${res.status}: ${text.slice(0, 200)}`);
-	}
-
-	const data = (await res.json()) as ChatCompletionResponse;
-	const content = data.choices?.[0]?.message?.content;
-	if (typeof content !== 'string' || content.length === 0) {
-		throw new Error('openai-compatible returned empty content');
-	}
-	return content;
-}
-
 /**
- * Streaming variant of `send`. Issues the same request shape but
- * with `stream: true`, parses the SSE response, and yields content
- * deltas as they arrive.
+ * Stream the agent's reply to a single channel turn.
+ *
+ * Issues `POST /chat/completions` with `stream: true`, parses the
+ * SSE response, and yields content deltas as they arrive.
  *
  * The first chunk's arrival latency is the *real* first-byte
  * latency of the upstream agent (Anthropic SSE for Wintermute,
@@ -127,7 +71,7 @@ async function send(args: OpenAICompatibleSendArgs): Promise<string> {
  *     `message_error`).
  */
 async function* streamReply(
-	args: OpenAICompatibleSendArgs
+	args: OpenAICompatibleStreamArgs
 ): AsyncGenerator<string, void, void> {
 	const {
 		base_url: baseUrl,
@@ -176,4 +120,4 @@ async function* streamReply(
 	yield* parseSseStream(res.body);
 }
 
-export const openAICompatibleConnector = { send, streamReply };
+export const openAICompatibleConnector = { streamReply };

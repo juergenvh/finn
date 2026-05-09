@@ -51,6 +51,12 @@
  *   and resuming the agent's session on the gateway side. Once finn
  *   has its own DB, we will additionally pass message history through
  *   for connectors that prefer client-managed history.
+ *
+ * Streaming-only since ADR-0013 phases 2 + 3:
+ *   This connector exposes `streamReply` only. The earlier
+ *   non-streaming `send` path was removed once both dispatch entry
+ *   points (`streamUserMessage`, `streamToAgent`) consumed the
+ *   streaming surface end-to-end.
  */
 
 import type { OpenclawConfig } from '../db/agent-config.ts';
@@ -126,75 +132,23 @@ type ChatMessage = {
 	content: string;
 };
 
-type ChatCompletionResponse = {
-	choices: Array<{
-		message?: { content?: string };
-	}>;
-};
-
 const SYSTEM_PROMPT =
 	"You are an assistant being addressed through 'finn', a multi-agent " +
 	'chat router. Reply concisely; the user is testing channel plumbing.';
 
-export type OpenclawSendArgs = {
+export type OpenclawStreamArgs = {
 	channelId: string;
 	body: string;
 	config: OpenclawConfig;
 };
 
-async function send(args: OpenclawSendArgs): Promise<string> {
-	const { base_url: baseUrl, model, token_env_var: tokenEnvVar } = args.config;
-	const apiKey = process.env[tokenEnvVar] ?? '';
-
-	const messages: ChatMessage[] = [
-		{ role: 'system', content: SYSTEM_PROMPT },
-		{ role: 'user', content: args.body }
-	];
-
-	const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
-
-	const explicitAgentId = explicitAgentIdFromModel(model);
-
-	const headers: Record<string, string> = {
-		'content-type': 'application/json',
-		// See ADR-0001. Always declare the scope, even when calling a
-		// gateway that will ignore the header — keeps the contract
-		// uniform across gateway auth modes.
-		'x-openclaw-scopes': FINN_SCOPES,
-		// See ADR-0002 + ADR-0012. Pin one OpenClaw-side session per
-		// (agent, finn channel) pair so each agent has its own continuous
-		// conversation per channel and switching the agent on a finn
-		// channel does not get hijacked by an existing session binding.
-		'x-openclaw-session-key': sessionKeyFor(explicitAgentId, args.channelId)
-	};
-	if (apiKey) {
-		headers.authorization = `Bearer ${apiKey}`;
-	}
-
-	const res = await fetch(url, {
-		method: 'POST',
-		headers,
-		body: JSON.stringify({ model, messages, stream: false })
-	});
-
-	if (!res.ok) {
-		const text = await res.text().catch(() => '');
-		throw new Error(`openclaw ${res.status}: ${text.slice(0, 200)}`);
-	}
-
-	const data = (await res.json()) as ChatCompletionResponse;
-	const content = data.choices?.[0]?.message?.content;
-	if (typeof content !== 'string' || content.length === 0) {
-		throw new Error('openclaw returned empty content');
-	}
-	return content;
-}
-
 /**
- * Streaming variant of `send`. Same request shape (incl. ADR-0001
- * scopes header and ADR-0002+0012 agent-aware session-key) but
- * with `stream: true`, parses the SSE response, and yields content
- * deltas as they arrive.
+ * Stream the agent's reply to a single channel turn.
+ *
+ * Issues `POST /chat/completions` with `stream: true` plus the
+ * ADR-0001 scopes header and ADR-0002 + ADR-0012 agent-aware
+ * session-key, parses the SSE response, and yields content deltas
+ * as they arrive.
  *
  * OpenClaw passes Anthropic / Ollama SSE through directly, so for
  * agents pointing at those backends the stream is genuinely
@@ -207,7 +161,7 @@ async function send(args: OpenclawSendArgs): Promise<string> {
  *     `message_error`).
  */
 async function* streamReply(
-	args: OpenclawSendArgs
+	args: OpenclawStreamArgs
 ): AsyncGenerator<string, void, void> {
 	const { base_url: baseUrl, model, token_env_var: tokenEnvVar } = args.config;
 	const apiKey = process.env[tokenEnvVar] ?? '';
@@ -248,4 +202,4 @@ async function* streamReply(
 	yield* parseSseStream(res.body);
 }
 
-export const openclawConnector = { send, streamReply };
+export const openclawConnector = { streamReply };
