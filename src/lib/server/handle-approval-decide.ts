@@ -3,12 +3,15 @@
  *
  * Streams broadcasts via `emit`:
  *   1. Update the approval row → emit `approval_updated`.
- *   2. (Approve only) For each target in parallel: dispatch the
- *      original message, persist the reply, emit it, and emit any
- *      derivative `approval_created` if the reply mentions another
- *      agent.
- *   3. Mark the approval `routed` once all target dispatches are
- *      done → emit `approval_updated`.
+ *   2. (Approve only) For each target in parallel: stream-relay the
+ *      original message via `streamToAgent` (each target emits its
+ *      own `message_start` / `message_delta` / `message_end`
+ *      lifecycle, ADR-0013 phase 3). Persist completed replies on
+ *      `message_end`; emit a derivative `approval_created` if a
+ *      reply mentions another agent.
+ *   3. Mark the approval `routed` once all target streams have
+ *      terminated (cleanly or with error) → emit
+ *      `approval_updated`.
  *
  * Reject path: emit the `approval_updated` (rejected) and stop.
  *
@@ -29,24 +32,9 @@ import {
 	type ApprovalDecision
 } from './approvals.ts';
 import { recordAgentMessage } from './messages.ts';
-import { dispatchToAgent } from './connectors/registry.ts';
+import { streamToAgent } from './connectors/registry.ts';
 import { resolveMentionedAgents } from './mentions.ts';
-import type { Emit, BroadcastMessage } from './ws/attach.ts';
-
-function messageBroadcast(
-	row: { id: string; channelId: string; body: string; createdAt: number },
-	senderId: string
-): BroadcastMessage {
-	return {
-		type: 'message',
-		channel_id: row.channelId,
-		sender: 'agent',
-		sender_id: senderId,
-		body: row.body,
-		ts: row.createdAt,
-		id: row.id
-	};
-}
+import type { Emit } from './ws/attach.ts';
 
 export type ApprovalDecideArgs = {
 	approval_id: string;
@@ -78,36 +66,71 @@ export async function handleApprovalDecide(args: ApprovalDecideArgs, emit: Emit)
 
 	const targets = decision.targets;
 
-	const settled = await Promise.allSettled(
-		targets.map((targetAgentId) =>
-			dispatchToAgent({
-				agent_id: targetAgentId,
-				channel_id: original.channelId,
-				body: original.body
-			})
-		)
+	// Stream-relay to every target in parallel. Each target's
+	// `streamToAgent` invocation emits its own
+	// `message_start`/`message_delta`/`message_end` (or
+	// `message_error`) directly via `emit`, so the user sees per-
+	// target bubbles begin filling immediately instead of waiting
+	// for the slowest relay. Promise.all resolves only when every
+	// target has terminated, mirroring the previous Promise.allSettled
+	// gate so `routed` still lands once the whole batch is done.
+	//
+	// `streamToAgent` already converts mid-stream errors into the
+	// `{ error }` outcome shape; it does not throw, so a single
+	// failing relay does not abort the others. The outer try/catch
+	// only guards against synchronous errors before the stream
+	// kicks off (e.g. an unknown agent id slipping through).
+	const outcomes = await Promise.all(
+		targets.map(async (targetAgentId) => {
+			try {
+				return await streamToAgent(
+					{
+						agent_id: targetAgentId,
+						channel_id: original.channelId,
+						body: original.body
+					},
+					emit
+				);
+			} catch (err) {
+				return {
+					agentId: targetAgentId,
+					messageId: '',
+					error: (err as Error).message ?? String(err)
+				};
+			}
+		})
 	);
 
-	for (let i = 0; i < settled.length; i++) {
-		const targetAgentId = targets[i]!;
-		const r = settled[i]!;
-		if (r.status === 'rejected') {
-			emit({
-				type: 'system',
-				body: `relay to ${targetAgentId} failed: ${(r.reason as Error).message}`
-			});
+	for (const outcome of outcomes) {
+		if ('error' in outcome) {
+			// `streamToAgent` already emitted `message_error` for the
+			// per-agent path (when it got far enough to mint a
+			// message id). The empty-messageId pre-stream failure
+			// case is rarer; surface it once via system event so the
+			// user is not left wondering why a target produced no
+			// bubble at all.
+			if (outcome.messageId === '') {
+				emit({
+					type: 'system',
+					body: `relay to ${outcome.agentId} failed: ${outcome.error}`
+				});
+			}
 			continue;
 		}
-		const reply = r.value;
-		const agentRow = recordAgentMessage({
-			channelId: original.channelId,
-			body: reply.body,
-			agentId: reply.agentId
-		});
-		emit(messageBroadcast(agentRow, reply.agentId));
 
-		const mentioned = resolveMentionedAgents(original.channelId, reply.body).filter(
-			(id) => id !== reply.agentId
+		// Persist the completed stream as one row, using the message
+		// id the dispatcher already announced via `message_start`.
+		const agentRow = recordAgentMessage({
+			id: outcome.messageId,
+			channelId: original.channelId,
+			body: outcome.body,
+			agentId: outcome.agentId
+		});
+
+		// A relayed reply may itself mention yet another agent and
+		// create a fresh pending approval (ADR-0005 recursion).
+		const mentioned = resolveMentionedAgents(original.channelId, outcome.body).filter(
+			(id) => id !== outcome.agentId
 		);
 		if (mentioned.length > 0) {
 			const newApproval = createPendingApproval({
