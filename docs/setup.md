@@ -1,5 +1,7 @@
 # finn — local setup
 
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/7e384bd0-3eae-4274-8eab-358496710703" />
+
 Quick guide for a fresh machine. Walks from `git clone` to a running
 finn with two agents and an approval flow you can poke at.
 
