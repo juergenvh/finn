@@ -118,6 +118,41 @@
 	}
 
 	const statusBadge = $derived(approval?.status ?? null);
+
+	/**
+	 * Streaming-lifecycle indicator (issue #43 part A).
+	 *
+	 * Three mutually-exclusive states for an agent reply:
+	 *   'streaming' — between message_start and message_end
+	 *   'errored'   — message_error arrived
+	 *   'done'      — settled (message_end arrived, or the row was
+	 *                 loaded from the DB and is by definition
+	 *                 complete)
+	 *
+	 * Only meaningful for agent bubbles. User and system messages
+	 * are never streamed; they don't get an indicator.
+	 */
+	const streamingState = $derived<'streaming' | 'errored' | 'done' | null>(
+		sender !== 'agent' ? null : streaming ? 'streaming' : error ? 'errored' : 'done'
+	);
+	const streamingIcon = $derived(
+		streamingState === 'streaming'
+			? '●'
+			: streamingState === 'errored'
+				? '⚠'
+				: streamingState === 'done'
+					? '✓'
+					: ''
+	);
+	const streamingTitle = $derived(
+		streamingState === 'streaming'
+			? 'streaming…'
+			: streamingState === 'errored'
+				? `stream failed${error ? `: ${error}` : ''}`
+				: streamingState === 'done'
+					? 'message complete'
+					: ''
+	);
 </script>
 
 <div class="row {sender}">
@@ -146,6 +181,13 @@
 				<div class="header-main">
 					<span class="who">{senderName}</span>
 					<span class="ts">{fmtTs(ts)}</span>
+					{#if streamingState}
+						<span
+							class="stream-icon stream-{streamingState}"
+							title={streamingTitle}
+							aria-label={streamingTitle}
+						>{streamingIcon}</span>
+					{/if}
 					{#if statusBadge}
 						<span class="badge {statusBadge}">{statusBadge}</span>
 					{/if}
@@ -372,7 +414,40 @@
 		color: #64748b;
 		font-size: 0.75rem;
 	}
+	.stream-icon {
+		/* First of the right-aligned header group: takes the
+		 * `margin-left: auto` so the icon and any following badge
+		 * sit flush against the bubble's right edge. */
+		margin-left: auto;
+		font-size: 0.78rem;
+		line-height: 1;
+		/* Reserve a stable width so streaming → done → errored
+		 * transitions don't reflow the rest of the header. */
+		min-width: 0.9rem;
+		text-align: center;
+		cursor: default;
+	}
+	.stream-streaming {
+		color: #38bdf8;
+		animation: stream-pulse 1.4s ease-in-out infinite;
+	}
+	.stream-done {
+		color: #475569;
+	}
+	.stream-errored {
+		color: #fca5a5;
+	}
+	@keyframes stream-pulse {
+		0%, 100% { opacity: 0.55; }
+		50% { opacity: 1; }
+	}
+
 	.badge {
+		/* Also `auto` so a badge alone (no preceding stream-icon, e.g.
+		 * on user-authored messages with an approval somehow) still
+		 * pushes right. When both stream-icon and badge are present,
+		 * the icon's auto absorbs the free space and the badge sits
+		 * flush to its right — the visual we want. */
 		margin-left: auto;
 		padding: 0.1rem 0.45rem;
 		border-radius: 9999px;
