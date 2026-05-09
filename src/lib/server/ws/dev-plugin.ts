@@ -24,6 +24,7 @@ import type { Plugin, ViteDevServer } from 'vite';
 import { attachWebSocketServer } from './attach';
 import { handleUserMessage } from '../handle-user-message';
 import { handleApprovalDecide } from '../handle-approval-decide';
+import { handleForwardMessage } from '../handle-forward';
 
 export function finnWsDevPlugin(): Plugin {
 	return {
@@ -32,7 +33,8 @@ export function finnWsDevPlugin(): Plugin {
 			if (!server.httpServer) return;
 			attachWebSocketServer(server.httpServer, {
 				onUserMessage: handleUserMessage,
-				onApprovalDecide: handleApprovalDecide
+				onApprovalDecide: handleApprovalDecide,
+				onForwardMessage: handleForwardMessage
 			});
 		}
 	};
