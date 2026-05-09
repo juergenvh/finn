@@ -242,3 +242,89 @@ applies to any bundler with a plugin system (Vite, esbuild,
 Rollup, webpack), not just Vite. If a piece of state genuinely
 must be shared across loader contexts, `globalThis` is the
 right tool, not module scope.
+
+---
+
+## 7. OpenAI streaming usage opt-in — 2026-05-09
+
+Built per-message token-count display (issue #43 part B,
+PR #50): SSE-parser learned a discriminated-union shape with
+a `usage` variant, dispatcher captured it, schema gained
+`tokens_json`, UI rendered a footer. End-to-end green
+locally, merged.
+
+**Symptom:** No footer ever appeared in production. Tested
+both fresh agent replies and existing rows; backend
+clearly worked, code clearly worked, but no `usage` event
+ever made it through the parser.
+
+**Root cause:** OpenAI's streaming SSE spec **does not
+include the `usage` block in chunks unless the request
+explicitly opts in via `stream_options: { include_usage: true }`**.
+Without the flag, the stream ends right after the last
+`finish_reason` chunk and goes straight to `[DONE]`. The
+parser was correct; it just never had a `usage`-bearing
+frame to parse, because the request never asked for one.
+
+I had read the OpenAI streaming-format reference for the
+*frame shapes* (which is where the `usage` field is
+documented) but not for the *request opt-ins*. The flag is
+in the spec, plainly visible — I'd internalised "usage
+arrives on the last chunk" without the necessary "if you ask
+for it" caveat.
+
+**Fix:** PR #51, two two-line additions to `openclaw.ts` and
+`openai-compatible.ts` adding the `stream_options` field. No
+schema change; existing post-#50 rows with NULL `tokens_json`
+stay that way; new replies populate it.
+
+Verified by curl-ing the local gateway with and without the
+flag and capturing both responses verbatim into the PR
+description, after the fix.
+
+**Meta — the lesson behind the lesson.** For features that
+involve a third-party wire contract, **smoke-curl the real
+endpoint before opening the PR**, not only after merging it.
+Reading the spec correctly is necessary but not sufficient;
+specs document what's *possible*, not what a given request
+*actually* triggers. Two minutes of `curl --no-buffer` saves
+two PRs.
+
+---
+
+## 8. ADR phase plans soft-framed as "later" — 2026-05-09
+
+ADR-0013 broke the streaming + sequencing work into five
+phases. Phase 3 ("same shape on the approval-routing relay
+path") was framed as a separate PR after phase 2, in the
+section header "Implementation phases (suggested)".
+
+**Symptom:** After phase 2 merged (PR #42), Jürgen reported
+that approving an agent-to-agent message no longer produced a
+streaming bubble — it sat silent until all relays settled and
+then dropped at once. UX inconsistency between the user-message
+path (streaming, since #42) and the approve-and-relay path
+(still non-streaming, scheduled for "later").
+
+**Root cause:** "Separate PR, can wait" reads to the human
+maintainer as "low-priority follow-up" and to the user as a
+visible regression the moment phase 2 ships. The two paths are
+both user-visible flows that shape user expectations together;
+shipping one without the other creates a mental "is this a bug
+or a feature?" question that doesn't go away until the second
+PR lands.
+
+**Fix:** Phase 3 shipped as PR #45 the same day. ADR-0013's
+"Implementation phases" section was rewritten in the post-
+phase-3 sweep to describe what was actually shipped, with a
+"Departure from the plan" note explicitly calling out the
+soft-framing.
+
+**Meta — the lesson for future ADR phase plans.** When a
+phase change makes two user-visible paths visibly differ from
+each other, ship them in tighter sequence (single PR, or
+back-to-back PRs landing the same day). Phase boundaries are
+fine for risk-isolation in the implementation graph; they are
+**not** appropriate UX boundaries to land separately. Re-read
+phase plans through the question "if we stop here, will users
+notice?" — if yes, the phase boundary was drawn wrong.
