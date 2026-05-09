@@ -191,7 +191,19 @@ async function* streamReply(
 	const res = await fetch(url, {
 		method: 'POST',
 		headers,
-		body: JSON.stringify({ model, messages, stream: true })
+		body: JSON.stringify({
+			model,
+			messages,
+			stream: true,
+			// OpenAI's standard switch to make `usage` show up on a
+			// streamed response (issue #43 part B). Without it the
+			// stream ends after the last content delta and no token
+			// counts are emitted; with it, a final
+			// `choices: [], usage: {...}` frame arrives just before
+			// `[DONE]`. OpenClaw passes this through to upstreams
+			// that honour it (Anthropic, Ollama).
+			stream_options: { include_usage: true }
+		})
 	});
 
 	if (!res.ok) {

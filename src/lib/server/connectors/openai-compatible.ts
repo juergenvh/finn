@@ -101,7 +101,16 @@ async function* streamReply(
 		model: modelHint,
 		messages,
 		user: args.channelId,
-		stream: true
+		stream: true,
+		// OpenAI's standard switch to make `usage` show up on a
+		// streamed response (issue #43 part B). Backends that honour
+		// it (vanilla OpenAI, Open WebUI, vLLM, llama.cpp's server)
+		// emit a final `choices: [], usage: {...}` frame just before
+		// `[DONE]`. Backends that ignore it (Wintermute today, since
+		// its adapter does not pass LiteLLM tokens through) simply
+		// don't — the bubble's token footer stays hidden, no harm
+		// done.
+		stream_options: { include_usage: true }
 	};
 
 	const res = await fetch(url, {
