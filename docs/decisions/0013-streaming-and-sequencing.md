@@ -1,9 +1,10 @@
 # ADR 0013 — Token-streaming and reply-sequencing for assistant messages
 
-- **Status:** **draft** (not yet accepted; this is the plan we agreed
-  on the evening of 2026-05-08, to be implemented in a feature
-  branch)
-- **Date:** 2026-05-08
+- **Status:** **accepted** — phases 1–3 + sweep all shipped
+  2026-05-08 … 2026-05-09. See §"Implementation phases" below for
+  the per-phase PR refs.
+- **Date:** 2026-05-08 (drafted), 2026-05-09 (fully implemented and
+  accepted)
 - **Deciders:** Jürgen, Dixie
 - **Related:** Issue #3 (token-streaming), comment on #3 (reply
   sequencing), ADR-0005 (approval flow), ADR-0001 (connector auth),
@@ -162,6 +163,11 @@ returns an `AsyncIterable<string>`. The signature mirrors `send`
 (which stays for back-compat / non-streaming paths) but yields
 chunks instead of returning a string.
 
+_(As-shipped: `send` stayed only briefly. Once both dispatcher
+entry points were on `streamReply` end-to-end — phase 3, PR
+#45 — the post-phase-3 sweep removed `send` from all three
+connectors. The contract today is `streamReply` only.)_
+
 ```ts
 export type StreamReply = (args: { channelId: string; body: string; config: Cfg })
     => AsyncIterable<string>;
@@ -202,6 +208,12 @@ start / deltas / end events; the existing `Promise.allSettled`
 loop becomes parallel async iteration. `markRouted()` runs once
 **all** relays have terminated (clean or error), same as today.
 
+_(As-shipped: phase 3, PR #45. The function was renamed
+`streamToAgent` and the per-agent streaming pipeline was
+extracted into a `streamOneAgent` helper shared with
+`streamUserMessage` so the user-message and approval-relay
+paths cannot silently diverge.)_
+
 ## Migration
 
 There is no DB migration. The schema does not change; only the
@@ -234,10 +246,10 @@ has its session-key set per the existing connector logic.
 
 **Negative.**
 
-- Two new code paths to maintain (streaming and non-streaming
-  `send`). We can deprecate `send` once both connectors have
-  `streamReply` and every caller uses it; until then, both live
-  side by side.
+- ~~Two new code paths to maintain (streaming and non-streaming
+  `send`).~~ _Resolved: the post-phase-3 sweep removed `send`
+  once every caller was on `streamReply`; the connectors now
+  expose `streamReply` only._
 - Mid-stream client disconnect is messy: the server keeps consuming
   the upstream stream until completion (because cancelling
   upstream is fragile and providers charge for tokens generated),
@@ -290,32 +302,62 @@ Decide when implementing #1, after streaming lands. Default
 recommendation: strategy 1 for the first cut, revisit if the
 flicker on `message_end` is jarring.
 
-## Implementation phases (suggested)
+## Implementation phases (as shipped)
 
-1. **Connector streaming, behind a feature flag.** Land
+1. **Connector streaming, behind a feature flag.** Landed
    `streamReply` on both connectors with the SSE-parser helper.
-   `dispatchUserMessage` keeps using `send` for now, but a unit
-   smoke-test exercises `streamReply` directly. Risk-isolated.
-2. **Switch the dispatcher.** Replace `Promise.allSettled` with
-   parallel async iteration that consumes `streamReply` and emits
-   the new event types. Update `WSInbound` and the client handler
-   in lockstep. This is the visible UX flip.
-3. **Same for `dispatchToAgent` / approval-routing.** Same shape as
-   step 2, in `handle-approval-decide.ts`.
-4. **Coordinate with #1** for the rendering side.
-5. **Sweep `send` once both callers are on `streamReply`.** Optional
-   tidy-up; can stay if removing it has surprising callers (none
-   today, but check).
+   The dispatcher continued using `send` at this point. PR
+   **#39** (2026-05-08).
+2. **Switch the dispatcher** — user-message path. Two-step
+   split for code review safety:
+   - **2a (server)**: replaced `Promise.allSettled` with parallel
+     async iteration in `streamUserMessage`, kept a legacy
+     `message`-event compat emit so older clients stayed
+     functional. PR **#41** (2026-05-08).
+   - **2b (client + cleanup)**: the client learned the
+     `message_start` / `message_delta` / `message_end` /
+     `message_error` lifecycle, the compat emit was dropped on
+     the server. PR **#42** (2026-05-08).
+3. **Same for the approval-routing relay path.** `dispatchToAgent`
+   replaced by `streamToAgent`, sharing the per-agent
+   `streamOneAgent` helper with `streamUserMessage` so the two
+   paths cannot silently diverge. PR **#45** (2026-05-09).
+4. **Sweep**: removed the now-dead non-streaming `send` methods
+   on all three connectors plus `callConnector` and
+   `DispatchedReply` from the registry. Updated
+   `docs/connectors.md` to the streaming-only contract. PR
+   **(this PR)**.
+5. **Coordinate with #1** for the rendering side. Status icon
+   shipped early as part A of #43 (PR **#44**, 2026-05-09):
+   header-level state indicator (● streaming, ✓ done,
+   ⚠ errored). The "plain-text-while-streaming, finalised on
+   end" markdown strategy lives with #1 itself.
 
-## Touched files (anticipated)
+Departure from the plan worth noting: phase 3 was originally
+described as "separate PR, can wait". Once phase 2 shipped,
+this became a visible UX inconsistency — user messages streamed
+but approve-and-relay didn't — reported by Jürgen during
+testing of #42. Future ADR phase plans should ship phase
+changes that make two paths visibly differ in tighter sequence.
 
-- `src/lib/server/connectors/openclaw.ts` — add `streamReply`.
-- `src/lib/server/connectors/openai-compatible.ts` — add `streamReply`.
-- `src/lib/server/connectors/sse-parser.ts` (new) — shared helper.
-- `src/lib/server/connectors/registry.ts` — add `streamConnector`
-  dispatch; keep `callConnector` for back-compat.
-- `src/lib/server/handle-user-message.ts` — switch to parallel
-  async iteration with start/delta/end emits.
+## Touched files
+
+- `src/lib/server/connectors/openclaw.ts` — `streamReply` added
+  in phase 1, `send` removed in the sweep.
+- `src/lib/server/connectors/openai-compatible.ts` — same.
+- `src/lib/server/connectors/anthropic-stub.ts` — `streamReply`
+  added in phase 2a (yields canned reply as a single chunk),
+  `send` removed in the sweep.
+- `src/lib/server/connectors/sse-parser.ts` (new) — shared SSE
+  helper, phase 1.
+- `src/lib/server/connectors/registry.ts` — `streamConnector`
+  helper, `streamOneAgent` per-agent core, `streamUserMessage`
+  and `streamToAgent` entry points (phases 2a + 3); old
+  `callConnector` / `DispatchedReply` / `dispatchUserMessage` /
+  `dispatchToAgent` removed by the end of the sweep.
+- `src/lib/server/handle-user-message.ts` — switched to parallel
+  async iteration with start/delta/end emits, phase 2a; legacy
+  compat emit dropped in phase 2b.
 - `src/lib/server/handle-approval-decide.ts` — same switch on the
   relay path.
 - `src/lib/server/ws/attach.ts` — extend `Emit` union with the new

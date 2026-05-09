@@ -533,32 +533,48 @@ calling, session keys, and fallback routing.
 
 ## Streaming status
 
-As of PR #39, both `openclaw` and `openai-compatible` connectors
-expose a `streamReply()` method that consumes OpenAI-style SSE
-frames (`data: {chunk}\n\n` ... `data: [DONE]`). The implementation
-is in `src/lib/server/connectors/sse-parser.ts` plus the
-connector-specific `streamReply` functions.
+**End-to-end streaming since PR #45 (ADR-0013 phases 2 + 3 in
+full).** The dispatcher fans out user messages with
+`streamUserMessage(args, emit)` and relays approved
+agent-to-agent messages with `streamToAgent(args, emit)`. Both
+drive a shared `streamOneAgent` helper that emits the same
+lifecycle over the WebSocket:
 
-**It is not yet wired into the dispatcher.** § `dispatchUserMessage`
-and `handle-approval-decide` still call the non-streaming `send()`
-path, so user-visible behaviour is unchanged: replies arrive whole,
-and multi-agent channels still wait for the slowest reply before
-showing any. The dispatcher switch is the next phase, tracked
-under issue #3 with the design captured in ADR-0013.
+  `message_start` → zero or more `message_delta` →
+  `message_end` (clean) **or** `message_error` (mid-flight)
 
-When the switch lands:
+Clients render an empty agent bubble on `message_start`, append
+on each `message_delta`, finalise on `message_end`, and switch
+to an error variant on `message_error`. A small status icon
+(● streaming, ✓ done, ⚠ errored) sits in the bubble header
+for at-a-glance state. The full wire shape and client handling
+are in ADR-0013.
 
-- Each agent's bubble starts rendering the moment its connector
-  call begins (or its first byte arrives), instead of after all
-  connectors have settled.
-- For backends that genuinely stream (OpenClaw → Anthropic,
-  OpenClaw → Ollama), bubbles fill token by token.
-- For backends that don't (Wintermute today; see
-  ADR-0013 §"Backend streaming maturity"), the bubble shows a
-  placeholder while the call is in flight, then the entire reply
-  drops in once the connector's stream terminates. The sequencing
-  win still applies — other agents are no longer blocked by the
-  slowest call.
+Connector contract: each connector exposes a single `streamReply`
+method returning `AsyncGenerator<string, void, void>`. The
+non-streaming `send` path that existed during the spike is gone—
+removed in the post-phase-3 sweep once both dispatcher entry
+points consumed the streaming surface end-to-end.
+
+Backend reality (see ADR-0013 §"Backend streaming maturity"):
+
+- **OpenClaw → Anthropic**: real token-by-token (Anthropic SSE
+  passes through).
+- **OpenClaw → Ollama (Gwen, etc.)**: real token-by-token (Ollama
+  streams).
+- **Wintermute (`/v1/*`)**: today emits a single content delta
+  carrying the full reply, then `[DONE]`. The wire contract is
+  already correct; finn does not need to change when Wintermute's
+  `agent.chat` upstream gains genuine streaming.
+- **`anthropic-stub`**: yields the canned reply as a single chunk
+  after a tiny artificial latency, mirroring Wintermute's shape
+  so the dispatcher exercise path is representative without
+  burning real API credits.
+
+The sequencing win applies even to backends that don't actually
+stream: per-recipient streams run in parallel, so a fast agent's
+bubble finishes while a slow agent's is still empty, and the
+slowest agent never blocks the rest of the channel.
 
 ---
 
