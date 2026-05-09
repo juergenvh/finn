@@ -985,8 +985,17 @@
 <div class="root">
 	<aside>
 		<div class="brand">
-			<h1>finn</h1>
-			<span class="status" class:on={connected}>{connected ? '●' : '○'}</span>
+			<img
+				src="/finn-brand.webp"
+				alt=""
+				width="140"
+				height="140"
+				class="brand-img"
+			/>
+			<div class="brand-row">
+				<h1>finn</h1>
+				<span class="status" class:on={connected}>{connected ? '●' : '○'}</span>
+			</div>
 		</div>
 
 		<a class="nav-link" href="/protocol">☰ Protocol viewer</a>
@@ -1255,9 +1264,25 @@
 	}
 	.brand {
 		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.4rem;
+		margin-bottom: 0.75rem;
+	}
+	.brand-img {
+		/* Decorative atmosphere asset; the wordmark below carries
+		 * the actual brand name. Stays a fixed display size; the
+		 * source is exported at 2× so it stays crisp on retina. */
+		width: 140px;
+		height: 140px;
+		border-radius: 6px;
+		border: 1px solid #2a2a30;
+		display: block;
+	}
+	.brand-row {
+		display: flex;
 		align-items: baseline;
 		gap: 0.5rem;
-		margin-bottom: 0.5rem;
 	}
 	.brand h1 {
 		margin: 0;
