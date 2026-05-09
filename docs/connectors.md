@@ -593,6 +593,23 @@ stream: per-recipient streams run in parallel, so a fast agent's
 bubble finishes while a slow agent's is still empty, and the
 slowest agent never blocks the rest of the channel.
 
+### Bubble rendering
+
+Message bodies are rendered as Markdown (GFM with soft line
+breaks) in the channel view, sanitised by DOMPurify. The
+rendering pipeline is uniform for user and agent bubbles — the
+sanitiser is the safety control, not the source. System messages
+stay plain.
+
+During streaming, bodies show as plain text plus a blinking
+cursor; on `message_end` the body re-renders through the
+Markdown pipeline (“plain-while-streaming, finalised on end”).
+No syntax highlighter today — fenced code blocks just get a
+monospace block treatment with internal `pre` whitespace.
+
+See [`docs/decisions/0016-rich-rendering.md`](decisions/0016-rich-rendering.md)
+for the full sanitiser policy and rationale.
+
 ## Routing modes (where the connectors get called from)
 
 Four places in the server call into a connector. All of them
