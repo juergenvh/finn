@@ -23,6 +23,18 @@
 		body: string;
 		ts: number;
 		hiddenAt: number | null;
+		/** True between `message_start` and `message_end` for streaming
+		 * agent replies (ADR-0013). The bubble renders a cursor while
+		 * this is true; finalises (e.g. for future markdown rendering)
+		 * when it flips back to false. Always false on initial-load /
+		 * load-older paths since those rows came from the DB and are
+		 * already complete. */
+		streaming: boolean;
+		/** Set when a `message_error` arrived for this message id mid
+		 * stream. The bubble surfaces the error inline; no DB row was
+		 * written, so this UIMessage is purely a client-side
+		 * presentation of the failure. */
+		error: string | null;
 	};
 
 	/* ---------- WebSocket + bootstrap state ---------- */
@@ -40,6 +52,15 @@
 	let allAgents = $state<AgentInfo[]>([]);
 	let members = $state<Record<string, AgentInfo[]>>({});
 	let messagesByChannel = $state<Record<string, UIMessage[]>>({});
+	/**
+	 * Map from streaming-message id → the channel id its bubble lives
+	 * in. Populated on `message_start`, drained on `message_end` /
+	 * `message_error`. Used so subsequent `message_delta` events can
+	 * find the bubble without scanning every channel's message list.
+	 * Plain object (not $state) because we never need reactivity on
+	 * the map itself — it's strictly a routing index.
+	 */
+	const streamingChannelById: Record<string, string> = {};
 	let approvalsByMessage = $state<Record<string, ApprovalSnapshot>>({});
 	/** Per channel: timestamp of the OLDEST message we have loaded.
 	 * Used to fire 'load older' fetches with a `before=` cursor. */
@@ -126,11 +147,28 @@
 		}
 	}
 
+	/**
+	 * Auto-scroll trigger.
+	 *
+	 * Re-runs whenever the active channel's message list changes
+	 * length OR the tail message's body grows mid-stream. The first
+	 * covers ordinary inserts (`message`, `message_start`); the
+	 * second covers `message_delta` events that grow an existing
+	 * tail bubble in place — without it, the scroll position would
+	 * stick at the cursor's original spot and the streaming text
+	 * would scroll out of view.
+	 *
+	 * The `void` calls make the read-for-tracking explicit; the
+	 * actual scroll work happens once after `tick()`.
+	 */
 	$effect(() => {
-		// Re-runs when the active channel's message list changes length.
-		if (activeChannelId && (messagesByChannel[activeChannelId]?.length ?? 0) >= 0) {
-			void scrollToBottom();
-		}
+		if (!activeChannelId) return;
+		const list = messagesByChannel[activeChannelId];
+		if (!list) return;
+		void list.length;
+		const tail = list[list.length - 1];
+		if (tail && tail.streaming) void tail.body.length;
+		void scrollToBottom();
 	});
 
 	/* ---------- derived: visible messages ---------- */
@@ -202,14 +240,16 @@
 		const memData = (await memRes.json()) as { members: AgentInfo[] };
 		const apprData = (await apprRes.json()) as { approvals: ApprovalSnapshot[] };
 
-		const ui = msgData.messages.map((m) => ({
+		const ui: UIMessage[] = msgData.messages.map((m) => ({
 			id: m.id,
 			channelId: m.channelId,
 			sender: m.senderType,
 			senderId: m.senderId,
 			body: m.body,
 			hiddenAt: m.hiddenAt ?? null,
-			ts: m.createdAt
+			ts: m.createdAt,
+			streaming: false,
+			error: null
 		}));
 		messagesByChannel = { ...messagesByChannel, [channelId]: ui };
 		oldestLoadedTs = {
@@ -250,14 +290,16 @@
 		const prevScrollTop = scroller?.scrollTop ?? 0;
 		suppressNextScroll = true;
 
-		const older = data.messages.map((m) => ({
+		const older: UIMessage[] = data.messages.map((m) => ({
 			id: m.id,
 			channelId: m.channelId,
 			sender: m.senderType,
 			senderId: m.senderId,
 			body: m.body,
 			hiddenAt: m.hiddenAt ?? null,
-			ts: m.createdAt
+			ts: m.createdAt,
+			streaming: false,
+			error: null
 		}));
 		const existing = messagesByChannel[activeChannelId] ?? [];
 		messagesByChannel = {
@@ -352,10 +394,87 @@
 						senderId: msg.sender_id,
 						body: msg.body,
 						hiddenAt: null,
-						ts: msg.ts
+						ts: msg.ts,
+						streaming: false,
+						error: null
 					}
 				]
 			};
+			return;
+		}
+		if (msg.type === 'message_start') {
+			// New streaming agent reply: insert an empty bubble so the
+			// user sees something immediately, before any token has
+			// arrived. Subsequent `message_delta` events append to body;
+			// `message_end` finalises; `message_error` flips the bubble
+			// to its failed variant.
+			const channelId = msg.channel_id;
+			const list = messagesByChannel[channelId] ?? [];
+			streamingChannelById[msg.id] = channelId;
+			messagesByChannel = {
+				...messagesByChannel,
+				[channelId]: [
+					...list,
+					{
+						id: msg.id,
+						channelId,
+						sender: 'agent',
+						senderId: msg.sender_id,
+						body: '',
+						hiddenAt: null,
+						ts: msg.ts,
+						streaming: true,
+						error: null
+					}
+				]
+			};
+			return;
+		}
+		if (msg.type === 'message_delta') {
+			const channelId = streamingChannelById[msg.id];
+			if (!channelId) return; // unknown id; ignore
+			const list = messagesByChannel[channelId];
+			if (!list) return;
+			messagesByChannel = {
+				...messagesByChannel,
+				[channelId]: list.map((m) =>
+					m.id === msg.id ? { ...m, body: m.body + msg.delta } : m
+				)
+			};
+			return;
+		}
+		if (msg.type === 'message_end') {
+			const channelId = streamingChannelById[msg.id];
+			if (!channelId) return;
+			const list = messagesByChannel[channelId];
+			if (!list) return;
+			// Reconcile against the server's final body in case the
+			// stream and the assembled deltas drifted (frame splits,
+			// dropped chunk on retry, etc.). The server's body is the
+			// authoritative one, since it is what the DB row stores.
+			messagesByChannel = {
+				...messagesByChannel,
+				[channelId]: list.map((m) =>
+					m.id === msg.id ? { ...m, body: msg.body, streaming: false } : m
+				)
+			};
+			delete streamingChannelById[msg.id];
+			return;
+		}
+		if (msg.type === 'message_error') {
+			const channelId = streamingChannelById[msg.id];
+			if (!channelId) return;
+			const list = messagesByChannel[channelId];
+			if (!list) return;
+			messagesByChannel = {
+				...messagesByChannel,
+				[channelId]: list.map((m) =>
+					m.id === msg.id
+						? { ...m, streaming: false, error: msg.error }
+						: m
+				)
+			};
+			delete streamingChannelById[msg.id];
 			return;
 		}
 		if (msg.type === 'approval_created' || msg.type === 'approval_updated') {
@@ -707,7 +826,9 @@
 			senderId: m.senderId,
 			body: m.body,
 			hiddenAt: m.hiddenAt ?? null,
-			ts: m.createdAt
+			ts: m.createdAt,
+			streaming: false,
+			error: null
 		}));
 	}
 
@@ -884,6 +1005,8 @@
 					senderName={nameOfSender(m)}
 					body={m.body}
 					ts={m.ts}
+					streaming={m.streaming}
+					error={m.error}
 					approval={approvalsByMessage[m.id]}
 					members={activeMembers}
 					excludeAgentIds={m.senderId ? [m.senderId] : []}
