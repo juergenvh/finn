@@ -3,6 +3,8 @@
 > *"Finn? Talks to the dead, mostly."*
 > — *Neuromancer*, William Gibson
 
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/3cb8b038-0edc-4e76-854f-132355bd7ff0" />
+
 A multi-agent chat UI with human-in-the-loop approval. One window, many
 agents (LLM endpoints, agent frameworks, anything that speaks HTTP),
 and a human routing every cross-agent message by hand. Named after
