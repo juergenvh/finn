@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AgentChipInput from './AgentChipInput.svelte';
 	import type { AgentInfo, ChannelInfo } from './types';
 
 	type Props = {
@@ -42,13 +43,6 @@
 		selectedMembers = new Set(currentMemberIds);
 		initializedFor = key;
 	});
-
-	function toggle(agentId: string) {
-		const next = new Set(selectedMembers);
-		if (next.has(agentId)) next.delete(agentId);
-		else next.add(agentId);
-		selectedMembers = next;
-	}
 
 	const canSubmit = $derived(name.trim().length > 0 && !submitting);
 
@@ -101,20 +95,11 @@
 		{#if allAgents.length === 0}
 			<p class="empty">no agents to add — create one first.</p>
 		{:else}
-			<div class="agents">
-				{#each allAgents as a (a.id)}
-					<label class="agent-row" class:disabled={!a.enabled}>
-						<input
-							type="checkbox"
-							checked={selectedMembers.has(a.id)}
-							onchange={() => toggle(a.id)}
-						/>
-						<span class="agent-name">{a.name}</span>
-						<span class="agent-type">{a.connectorType}</span>
-						{#if !a.enabled}<span class="agent-flag">disabled</span>{/if}
-					</label>
-				{/each}
-			</div>
+			<AgentChipInput
+				{allAgents}
+				value={selectedMembers}
+				onChange={(next) => (selectedMembers = next)}
+			/>
 		{/if}
 	</fieldset>
 
@@ -171,34 +156,6 @@
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		padding: 0 0.4rem;
-	}
-	.agents {
-		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
-	}
-	.agent-row {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		font-size: 0.9rem;
-		padding: 0.2rem 0;
-	}
-	.agent-row.disabled {
-		opacity: 0.55;
-	}
-	.agent-name {
-		font-weight: 500;
-	}
-	.agent-type {
-		color: #64748b;
-		font-size: 0.75rem;
-	}
-	.agent-flag {
-		color: #64748b;
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		margin-left: auto;
 	}
 	.empty {
 		color: #777;
