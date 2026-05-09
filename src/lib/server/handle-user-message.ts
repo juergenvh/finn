@@ -5,11 +5,19 @@
  * ready:
  *   1. Persist the user turn → emit it (so the user's bubble appears
  *      immediately, before any connector latency).
- *   2. Dispatch to channel-member agents (narrowed to mentioned
- *      agents if the body contains `@-mentions`, see issue #27);
- *      for each reply that arrives, persist it and emit it.
- *   3. For agent replies that mention other agents, create an approval
- *      row and emit `approval_created`.
+ *   2. Stream-dispatch to channel-member agents (narrowed to mentioned
+ *      agents if the body contains `@-mentions`, see issue #27).
+ *      Each agent emits its own
+ *      `message_start` / `message_delta` / `message_end` lifecycle
+ *      (ADR-0013); per-agent dispatchers run in parallel so the user
+ *      sees fast agents replying while slower ones are still
+ *      streaming.
+ *   3. On `message_end`, persist the agent reply and (phase 2a only)
+ *      additionally emit a legacy `message` event so clients that do
+ *      not yet handle the streaming lifecycle keep working unchanged.
+ *      Phase 2b removes the legacy emit.
+ *   4. For agent replies that mention other agents, create an
+ *      approval row and emit `approval_created`.
  *
  * Per ADR-0005: user → agent never needs approval. Agent → agent
  * always does. Agent → user (no `@-mention` to other agents) is
@@ -18,7 +26,7 @@
 
 import type { Emit, BroadcastMessage } from './ws/attach.ts';
 import { recordUserMessage, recordAgentMessage } from './messages.ts';
-import { dispatchUserMessage, type DispatchResult } from './connectors/registry.ts';
+import { streamUserMessage } from './connectors/registry.ts';
 import { resolveMentionedAgents } from './mentions.ts';
 import { createPendingApproval, targetsOf } from './approvals.ts';
 
@@ -45,9 +53,12 @@ export async function handleUserMessage(
 	const userRow = recordUserMessage({ channelId: args.channel_id, body: args.body });
 	emit(messageBroadcast(userRow, 'user', userRow.senderId ?? 'jurgen'));
 
-	let result: DispatchResult;
+	let result: Awaited<ReturnType<typeof streamUserMessage>>;
 	try {
-		result = await dispatchUserMessage({ channel_id: args.channel_id, body: args.body });
+		result = await streamUserMessage(
+			{ channel_id: args.channel_id, body: args.body },
+			emit
+		);
 	} catch (err) {
 		emit({ type: 'system', body: `dispatch error: ${(err as Error).message}` });
 		return;
@@ -78,15 +89,28 @@ export async function handleUserMessage(
 
 	for (const reply of result.replies) {
 		if ('error' in reply) {
+			// streamUserMessage already emitted message_error for the
+			// per-agent path. Surface the error to legacy-only clients
+			// via the existing system-event channel as well, mirroring
+			// the previous behaviour. Phase 2b drops the system event
+			// duplicate once the client handles message_error.
 			emit({ type: 'system', body: `agent ${reply.agentId} error: ${reply.error}` });
 			continue;
 		}
 
+		// Persist the completed stream as one row, using the message id
+		// the dispatcher already announced via message_start.
 		const agentRow = recordAgentMessage({
+			id: reply.messageId,
 			channelId: args.channel_id,
 			body: reply.body,
 			agentId: reply.agentId
 		});
+
+		// Phase 2a compatibility emit: clients that do not yet know
+		// the message_start / message_delta / message_end lifecycle
+		// still receive a legacy `message` event with the final body
+		// and stay functional. Phase 2b removes this line.
 		emit(messageBroadcast(agentRow, 'agent', reply.agentId));
 
 		// Mentions in the agent reply that resolve to OTHER agents in

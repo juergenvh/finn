@@ -33,15 +33,33 @@ export type AnthropicStubSendArgs = {
 
 const counters = new Map<string, number>();
 
-async function send(args: AnthropicStubSendArgs): Promise<string> {
+function pickReply(args: AnthropicStubSendArgs): string {
 	const key = `${args.channelId}|${args.config.persona}`;
 	const idx = counters.get(key) ?? 0;
 	counters.set(key, idx + 1);
-	const reply = args.config.replies[idx % args.config.replies.length]!;
+	return args.config.replies[idx % args.config.replies.length]!;
+}
+
+async function send(args: AnthropicStubSendArgs): Promise<string> {
+	const reply = pickReply(args);
 	// Tiny artificial latency so the UI gets to render the user
 	// message before the reply lands; keeps the stream feeling real.
 	await new Promise((r) => setTimeout(r, 80));
 	return reply;
 }
 
-export const anthropicStubConnector = { send };
+/**
+ * Streaming variant — yields the canned reply in a single chunk
+ * after the same artificial latency. Mirrors what Wintermute does
+ * today (single content delta) so the dispatcher exercise path is
+ * representative without burning real API credits.
+ */
+async function* streamReply(
+	args: AnthropicStubSendArgs
+): AsyncGenerator<string, void, void> {
+	const reply = pickReply(args);
+	await new Promise((r) => setTimeout(r, 80));
+	yield reply;
+}
+
+export const anthropicStubConnector = { send, streamReply };
