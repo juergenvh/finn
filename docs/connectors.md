@@ -551,25 +551,33 @@ for at-a-glance state. The full wire shape and client handling
 are in ADR-0013.
 
 Connector contract: each connector exposes a single `streamReply`
-method returning `AsyncGenerator<string, void, void>`. The
-non-streaming `send` path that existed during the spike is gone—
-removed in the post-phase-3 sweep once both dispatcher entry
-points consumed the streaming surface end-to-end.
+method returning `AsyncGenerator<SseEvent, void, void>` where
+`SseEvent` is the discriminated union
+`{ kind: 'delta'; text: string } | { kind: 'usage'; usage: UsageReport }`.
+Deltas accumulate the body; the optional `usage` event (issue
+#43 part B) is captured by the dispatcher and persisted as
+`messages.tokens_json`. The non-streaming `send` path that
+existed during the spike is gone — removed in the post-phase-3
+sweep once both dispatcher entry points consumed the streaming
+surface end-to-end.
 
 Backend reality (see ADR-0013 §"Backend streaming maturity"):
 
 - **OpenClaw → Anthropic**: real token-by-token (Anthropic SSE
-  passes through).
+  passes through). Reports `usage` on the final frame.
 - **OpenClaw → Ollama (Gwen, etc.)**: real token-by-token (Ollama
-  streams).
+  streams). Reports `usage` on the final frame.
 - **Wintermute (`/v1/*`)**: today emits a single content delta
   carrying the full reply, then `[DONE]`. The wire contract is
   already correct; finn does not need to change when Wintermute's
-  `agent.chat` upstream gains genuine streaming.
+  `agent.chat` upstream gains genuine streaming. Does **not**
+  report `usage` today (LiteLLM token counts not passed
+  through); the bubble's token footer stays hidden.
 - **`anthropic-stub`**: yields the canned reply as a single chunk
   after a tiny artificial latency, mirroring Wintermute's shape
   so the dispatcher exercise path is representative without
-  burning real API credits.
+  burning real API credits. Does not emit `usage` (a stub is not
+  a real LLM call, fabricated counters would mislead).
 
 The sequencing win applies even to backends that don't actually
 stream: per-recipient streams run in parallel, so a fast agent's

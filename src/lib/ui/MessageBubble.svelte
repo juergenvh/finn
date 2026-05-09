@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { AgentInfo, ApprovalSnapshot } from './types';
+	import type { AgentInfo, ApprovalSnapshot, TokenUsage } from './types';
 
 	type Props = {
 		sender: 'user' | 'agent' | 'system';
@@ -17,6 +17,11 @@
 		 * Mutually exclusive with `streaming` (an errored bubble is
 		 * no longer in flight). */
 		error?: string | null;
+		/** Token-usage counters for agent replies (issue #43 part B).
+		 * Renders as a small footer line under the body when set;
+		 * absent means no footer. Backends that don't surface usage
+		 * (Wintermute today, anthropic-stub) keep this null. */
+		tokens?: TokenUsage | null;
 		approval?: ApprovalSnapshot;
 		members: AgentInfo[];
 		excludeAgentIds?: string[];
@@ -32,6 +37,7 @@
 		ts,
 		streaming = false,
 		error = null,
+		tokens = null,
 		approval,
 		members,
 		excludeAgentIds = [],
@@ -216,6 +222,25 @@
 			</div>
 		{/if}
 
+		{#if tokens && !streaming}
+			<!--
+				Footer sub-line for per-message metadata. Currently only
+				hosts the token-usage counters; future tenants (model
+				name, latency, relay path, etc.) plug in here so the
+				header stays focused on identity + state.
+
+				Hidden while streaming — the upstream's usage block
+				arrives at message_end, never mid-stream, so showing 0/0
+				earlier would be misleading.
+			-->
+			<div class="footer" aria-label="message metadata">
+				<span class="footer-item" title="input → output tokens reported by the upstream backend">
+					tokens: {tokens.total}
+					<span class="tokens-detail">(<span class="tok-arrow" aria-label="input">↓</span>{tokens.input}, <span class="tok-arrow" aria-label="output">↑</span>{tokens.output})</span>
+				</span>
+			</div>
+		{/if}
+
 		{#if approval && approval.status === 'pending'}
 			<div class="approval">
 				<div class="targets">
@@ -386,6 +411,32 @@
 	}
 	.error-icon {
 		color: #fca5a5;
+	}
+
+	.footer {
+		margin-top: 0.5rem;
+		padding-top: 0.4rem;
+		border-top: 1px solid rgba(255, 255, 255, 0.06);
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0 0.6rem;
+		color: #64748b;
+		font-size: 0.7rem;
+		line-height: 1.4;
+	}
+	.footer-item {
+		display: inline-flex;
+		gap: 0.25rem;
+		align-items: baseline;
+	}
+	.tokens-detail {
+		color: #475569;
+	}
+	.tok-arrow {
+		color: #475569;
+		display: inline-block;
+		width: 0.8em;
+		text-align: center;
 	}
 
 	.header {

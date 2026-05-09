@@ -12,6 +12,7 @@
 		AgentInfo,
 		DBMessage,
 		ApprovalSnapshot,
+		TokenUsage,
 		WSInbound
 	} from '$lib/ui/types';
 
@@ -35,7 +36,37 @@
 		 * written, so this UIMessage is purely a client-side
 		 * presentation of the failure. */
 		error: string | null;
+		/** Token-usage counters captured from the upstream (issue #43
+		 * part B). Set on `message_end` (when the backend reported
+		 * usage) or decoded once at load time from `tokensJson`. NULL
+		 * for user / system / pre-feature rows / backends without
+		 * usage. */
+		tokens: TokenUsage | null;
 	};
+
+	/**
+	 * Decode `tokens_json` from a DB row into the in-memory shape.
+	 * Tolerates malformed JSON (older rows, manually-edited DB) by
+	 * falling back to null — a missing footer is preferable to a
+	 * crashed channel view.
+	 */
+	function decodeTokens(raw: string | null | undefined): TokenUsage | null {
+		if (!raw) return null;
+		try {
+			const parsed = JSON.parse(raw);
+			if (
+				parsed &&
+				typeof parsed.input === 'number' &&
+				typeof parsed.output === 'number' &&
+				typeof parsed.total === 'number'
+			) {
+				return { input: parsed.input, output: parsed.output, total: parsed.total };
+			}
+		} catch {
+			// fall through to null
+		}
+		return null;
+	}
 
 	/* ---------- WebSocket + bootstrap state ---------- */
 
@@ -249,7 +280,8 @@
 			hiddenAt: m.hiddenAt ?? null,
 			ts: m.createdAt,
 			streaming: false,
-			error: null
+			error: null,
+			tokens: decodeTokens(m.tokensJson)
 		}));
 		messagesByChannel = { ...messagesByChannel, [channelId]: ui };
 		oldestLoadedTs = {
@@ -299,7 +331,8 @@
 			hiddenAt: m.hiddenAt ?? null,
 			ts: m.createdAt,
 			streaming: false,
-			error: null
+			error: null,
+			tokens: decodeTokens(m.tokensJson)
 		}));
 		const existing = messagesByChannel[activeChannelId] ?? [];
 		messagesByChannel = {
@@ -396,7 +429,8 @@
 						hiddenAt: null,
 						ts: msg.ts,
 						streaming: false,
-						error: null
+						error: null,
+						tokens: null
 					}
 				]
 			};
@@ -424,7 +458,8 @@
 						hiddenAt: null,
 						ts: msg.ts,
 						streaming: true,
-						error: null
+						error: null,
+						tokens: null
 					}
 				]
 			};
@@ -452,10 +487,15 @@
 			// stream and the assembled deltas drifted (frame splits,
 			// dropped chunk on retry, etc.). The server's body is the
 			// authoritative one, since it is what the DB row stores.
+			// Tokens (if reported by the upstream) land here too and
+			// drive the bubble's footer; absent means no footer.
+			const tokens = msg.tokens ?? null;
 			messagesByChannel = {
 				...messagesByChannel,
 				[channelId]: list.map((m) =>
-					m.id === msg.id ? { ...m, body: msg.body, streaming: false } : m
+					m.id === msg.id
+						? { ...m, body: msg.body, streaming: false, tokens }
+						: m
 				)
 			};
 			delete streamingChannelById[msg.id];
@@ -828,7 +868,8 @@
 			hiddenAt: m.hiddenAt ?? null,
 			ts: m.createdAt,
 			streaming: false,
-			error: null
+			error: null,
+			tokens: decodeTokens(m.tokensJson)
 		}));
 	}
 
@@ -1007,6 +1048,7 @@
 					ts={m.ts}
 					streaming={m.streaming}
 					error={m.error}
+					tokens={m.tokens}
 					approval={approvalsByMessage[m.id]}
 					members={activeMembers}
 					excludeAgentIds={m.senderId ? [m.senderId] : []}

@@ -155,6 +155,7 @@ export function queryProtocol(query: ProtocolQuery): ProtocolPage {
 			parentMessageId: messages.parentMessageId,
 			hiddenAt: messages.hiddenAt,
 			hiddenBy: messages.hiddenBy,
+			tokensJson: messages.tokensJson,
 			channelName: channels.name
 		})
 		.from(messages)
@@ -206,6 +207,7 @@ export function queryProtocol(query: ProtocolQuery): ProtocolPage {
 		parentMessageId: row.parentMessageId,
 		hiddenAt: row.hiddenAt,
 		hiddenBy: row.hiddenBy,
+		tokensJson: row.tokensJson,
 		channelName: row.channelName,
 		senderName:
 			row.senderType === 'agent' && row.senderId

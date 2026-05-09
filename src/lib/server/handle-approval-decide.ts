@@ -124,7 +124,8 @@ export async function handleApprovalDecide(args: ApprovalDecideArgs, emit: Emit)
 			id: outcome.messageId,
 			channelId: original.channelId,
 			body: outcome.body,
-			agentId: outcome.agentId
+			agentId: outcome.agentId,
+			tokens: outcome.tokens
 		});
 
 		// A relayed reply may itself mention yet another agent and

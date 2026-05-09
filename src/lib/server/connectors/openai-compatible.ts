@@ -32,7 +32,7 @@
  */
 
 import type { OpenAICompatibleConfig } from '../db/agent-config.ts';
-import { parseSseStream } from './sse-parser.ts';
+import { parseSseStream, type SseEvent } from './sse-parser.ts';
 
 type ChatMessage = {
 	role: 'system' | 'user' | 'assistant';
@@ -72,7 +72,7 @@ export type OpenAICompatibleStreamArgs = {
  */
 async function* streamReply(
 	args: OpenAICompatibleStreamArgs
-): AsyncGenerator<string, void, void> {
+): AsyncGenerator<SseEvent, void, void> {
 	const {
 		base_url: baseUrl,
 		model_hint: modelHint,

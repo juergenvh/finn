@@ -100,7 +100,23 @@ export const messages = sqliteTable('messages', {
 	 * column rather than a constant so a future per-user model
 	 * doesn't need a schema reshape.
 	 */
-	hiddenBy: text('hidden_by')
+	hiddenBy: text('hidden_by'),
+	/**
+	 * Token-usage counters for agent replies, JSON-encoded
+	 * `{ input: number; output: number; total: number }` (issue #43
+	 * part B). NULL for:
+	 *   - user / system messages (no LLM call to count against)
+	 *   - agent backends that do not surface usage today
+	 *     (Wintermute's `/v1/*` adapter at the moment;
+	 *     `anthropic-stub`)
+	 *   - historical rows written before this column existed
+	 *
+	 * Set once at insert time on the streaming `message_end` path
+	 * (see ADR-0013 + handle-user-message.ts /
+	 * handle-approval-decide.ts). Append-only contract intact: the
+	 * column is never updated.
+	 */
+	tokensJson: text('tokens_json')
 });
 
 /* --------------------------------------------------------------- approvals */

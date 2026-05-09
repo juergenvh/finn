@@ -101,7 +101,8 @@ export async function handleUserMessage(
 			id: reply.messageId,
 			channelId: args.channel_id,
 			body: reply.body,
-			agentId: reply.agentId
+			agentId: reply.agentId,
+			tokens: reply.tokens
 		});
 
 		// Mentions in the agent reply that resolve to OTHER agents in

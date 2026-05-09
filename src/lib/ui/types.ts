@@ -22,6 +22,20 @@ export type DBMessage = {
 	createdAt: number;
 	hiddenAt?: number | null;
 	hiddenBy?: string | null;
+	/**
+	 * Token-usage counters for agent replies (issue #43 part B),
+	 * JSON-encoded as `{"input":N,"output":N,"total":N}` server-side.
+	 * NULL for user / system / pre-feature rows / backends without
+	 * usage. The page component decodes once on load and stuffs the
+	 * parsed object into its in-memory `UIMessage`.
+	 */
+	tokensJson?: string | null;
+};
+
+export type TokenUsage = {
+	input: number;
+	output: number;
+	total: number;
 };
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'routed';
@@ -69,6 +83,9 @@ export type WSMessageEnd = {
 	type: 'message_end';
 	id: string;
 	body: string;
+	/** See server BroadcastMessageEnd; absent when the upstream
+	 * backend did not surface usage on its SSE wire. */
+	tokens?: TokenUsage;
 };
 export type WSMessageError = {
 	type: 'message_error';

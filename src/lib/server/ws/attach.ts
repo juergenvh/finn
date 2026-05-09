@@ -141,6 +141,14 @@ export type BroadcastMessageEnd = {
 	id: string;
 	/** Full final body, in case the client wants to reconcile its buffer. */
 	body: string;
+	/**
+	 * Token-usage counters, when the upstream backend reported them
+	 * on its SSE wire (issue #43 part B). Absent for backends that
+	 * do not surface usage today (Wintermute's `/v1/*` adapter,
+	 * `anthropic-stub`); the client treats absent and null as
+	 * equivalent and renders no token footer.
+	 */
+	tokens?: { input: number; output: number; total: number };
 };
 
 export type BroadcastMessageError = {

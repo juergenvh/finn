@@ -46,6 +46,7 @@ import type {
 	BroadcastMessageError,
 	BroadcastMessageStart
 } from '../ws/attach.ts';
+import type { SseEvent, UsageReport } from './sse-parser.ts';
 
 /**
  * One completed agent reply produced by the streaming dispatcher.
@@ -55,11 +56,17 @@ import type {
  * the caller can persist with `recordAgentMessage({ id: messageId,
  * ... })` and downstream clients see a row whose primary key
  * matches the streamed events.
+ *
+ * `tokens` carries the upstream `usage` block when the backend
+ * surfaced one on its SSE wire. It is `null` for backends that do
+ * not (Wintermute today; `anthropic-stub`); the dispatcher writes
+ * NULL into `messages.tokens_json` in that case.
  */
 export type StreamedDispatchedReply = {
 	agentId: string;
 	messageId: string;
 	body: string;
+	tokens: UsageReport | null;
 };
 
 /**
@@ -140,20 +147,24 @@ function requireChannel(channelId: string): void {
 /**
  * Resolve the per-connector streaming generator for an agent.
  *
+ * Yields `SseEvent`s (content deltas + the optional final usage
+ * block). The dispatcher's `streamOneAgent` consumes both kinds.
+ *
  * `FINN_ECHO_ONLY=1` short-circuits to a single-chunk yield of a
  * canned echo body so test/dev environments don't need real
  * backends. The dispatcher pipeline then drives the same
  * `streamOneAgent` lifecycle around the canned chunk as it would
- * around a real upstream stream.
+ * around a real upstream stream. No usage event is emitted on
+ * the echo path — the row is persisted with NULL tokens.
  */
 function streamConnector(
 	agent: MemberAgent,
 	channelId: string,
 	body: string
-): AsyncIterable<string> {
+): AsyncIterable<SseEvent> {
 	if (ECHO) {
 		return (async function* () {
-			yield `echo (${agent.name}): ${body}`;
+			yield { kind: 'delta', text: `echo (${agent.name}): ${body}` };
 		})();
 	}
 
@@ -232,10 +243,13 @@ type StreamEmit = (
  * `streamToAgent` (single-recipient relay).
  *
  * Mints a fresh message id, emits `message_start`, iterates the
- * connector's `streamReply` (one `message_delta` per yielded chunk
- * accumulating the body), and emits exactly one of `message_end`
- * (clean) or `message_error` (mid-flight failure). Returns the
- * per-agent outcome shape for the caller to persist or surface.
+ * connector's `streamReply` (one `message_delta` per content
+ * chunk accumulating the body, plus the optional final
+ * `usage` block), and emits exactly one of `message_end` (clean)
+ * or `message_error` (mid-flight failure). Returns the per-agent
+ * outcome shape for the caller to persist or surface; the
+ * `tokens` field is the captured `usage` block or `null` when
+ * the backend never emitted one.
  */
 async function streamOneAgent(
 	agent: MemberAgent,
@@ -254,20 +268,34 @@ async function streamOneAgent(
 	});
 
 	let fullBody = '';
+	let tokens: UsageReport | null = null;
 	try {
 		const stream = streamConnector(agent, channelId, body);
-		for await (const chunk of stream) {
-			if (typeof chunk !== 'string' || chunk.length === 0) continue;
-			fullBody += chunk;
-			emit({ type: 'message_delta', id: messageId, delta: chunk });
+		for await (const event of stream) {
+			if (event.kind === 'delta') {
+				if (event.text.length === 0) continue;
+				fullBody += event.text;
+				emit({ type: 'message_delta', id: messageId, delta: event.text });
+			} else if (event.kind === 'usage') {
+				// At-most-once per stream by parser contract; if a
+				// pathological backend ever emits it twice, last
+				// wins. The amounts are the upstream's authoritative
+				// counters — we do not derive or estimate.
+				tokens = event.usage;
+			}
 		}
 
 		if (fullBody.length === 0) {
 			throw new Error('connector stream ended with no content');
 		}
 
-		emit({ type: 'message_end', id: messageId, body: fullBody });
-		return { agentId: agent.id, messageId, body: fullBody };
+		emit({
+			type: 'message_end',
+			id: messageId,
+			body: fullBody,
+			tokens: tokens ?? undefined
+		});
+		return { agentId: agent.id, messageId, body: fullBody, tokens };
 	} catch (err) {
 		const error = (err as Error).message ?? String(err);
 		emit({ type: 'message_error', id: messageId, error });
