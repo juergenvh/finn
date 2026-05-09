@@ -328,3 +328,53 @@ fine for risk-isolation in the implementation graph; they are
 **not** appropriate UX boundaries to land separately. Re-read
 phase plans through the question "if we stop here, will users
 notice?" — if yes, the phase boundary was drawn wrong.
+
+---
+
+## 9. DOMPurify v3 ships its own types — 2026-05-09
+
+Building rich-rendering (PR #58, ADR-0016), I reflexively
+installed `@types/dompurify` as a devDep alongside the
+`dompurify` runtime dep. That path is correct for many libraries
+that don't ship types of their own — but `dompurify@3.x` ships
+TypeScript declarations directly in its package.
+
+**Symptom:** Three `svelte-check` errors immediately after
+adding the import:
+```
+Cannot find namespace 'DOMPurify'
+Type 'TrustedHTML' is not assignable to type 'string'  (×2)
+```
+
+The first one was the giveaway. v3's types export `Config` as a
+**named type export**, not as a `DOMPurify.<Config>` namespace;
+the v2 `@types/dompurify` package declares the legacy namespace
+shape and shadows the bundled v3 types when both are present.
+Result: the code compiled against the wrong declaration file
+and the `sanitize()` overloads picked the wrong return type
+(`TrustedHTML | string` instead of just `string`).
+
+**Fix:** Two steps, in this order.
+
+1. `npm uninstall @types/dompurify` to remove the v2-shaped
+   shadow.
+2. Switch the import to the named-export form:
+   ```ts
+   import DOMPurify, { type Config as DOMPurifyConfig } from 'dompurify';
+   ```
+
+After that, types resolved correctly and svelte-check ran
+clean.
+
+**Meta — the lesson behind the lesson.** When adding a typed
+library to a project, **check the package's own
+`*.d.ts` first** before reaching for `@types/<name>`. Most
+modern libraries (anything published in the last 2-3 years)
+bundle their own declarations and an `@types` companion only
+exists for legacy versions. Installing both creates the kind
+of silent type-shadowing that produces oblique errors in
+unrelated code (the failing `sanitize()` overload was 30 lines
+away from the import that caused the shadow).
+
+A `find node_modules/<pkg> -name '*.d.ts'` is cheap; it would
+have surfaced the bundled types in two seconds.
