@@ -23,13 +23,15 @@ is structurally split into two surfaces:
   search, filter, and markdown export of the full message history
   including groomed rows.
 
-Rich-rendering / Markdown for message bodies, settings surface,
-and launchd integration are tracked as open issues; see §"Roadmap".
-Token-streaming and per-message token-usage display landed in
-ADR-0013 phases 2–3 and issue #43. Manual message forwarding
-(↗ on a bubble routes it to picked agents directly, ADR-0014)
-is live. Wintermute and any other OpenAI-compatible backend
-are reachable via the `openai-compatible` connector type.
+All phase 1 (daily-use blocker) issues are closed: token-streaming
+with reply-sequencing (ADR-0013), per-message token-usage display
+(#43), markdown rich-rendering with mention spans and the
+ResizeObserver scroll discipline (ADR-0016 / #1). Manual message
+forwarding (ADR-0014) is live. Open work is now phase 2 (settings
+surface, auto-approve channels, member-selection UX) and
+discovery items — see §"Roadmap". Wintermute and any other
+OpenAI-compatible backend are reachable via the
+`openai-compatible` connector type.
 
 ## What it is
 
@@ -416,7 +418,29 @@ In ascending order of integration weight:
 14. **Streaming status icon + token-count footer in bubbles** ✓
     — ● streaming, ✓ done, ⚠ errored in the header;
     `tokens: total (↓input, ↑output)` in the footer when the
-    backend reports usage. Issue #43.
+    backend reports usage, `tokens: —` with tooltip otherwise.
+    Always-on for agent bubbles for layout consistency. Issue
+    #43.
+15. **Rich-rendered message bodies** ✓ — GFM markdown via
+    `marked` + `DOMPurify`, soft line breaks, fenced code
+    blocks (no syntax highlighter — deliberate, ADR-0016 out
+    of scope), inline `code`, lists, tables, blockquotes.
+    `@-mention` post-process renders styled spans only when
+    the token resolves against current channel members; skips
+    text inside code blocks and existing links. Same pipeline
+    for user and agent bubbles — the sanitiser is the safety
+    control, not the source. Streaming bubbles render plain
+    text + cursor; the markdown finalisation triggers on
+    `message_end`.
+16. **ResizeObserver scroll discipline** ✓ — one observer on
+    the messages-container catches every layout-changing
+    event (streaming deltas, `message_end` markdown
+    finalisation, late `approval_created` adding buttons,
+    forward picker expanding mid-channel). Snaps to bottom
+    when the user is at-or-near the bottom (50 px threshold);
+    leaves the user alone when they scrolled up to read
+    history. Replaces the per-event scroll triggers from
+    earlier PRs. ADR-0016 §8.
 
 ## What this is **not** doing
 
@@ -522,13 +546,10 @@ reflecting how directly they affect daily-use viability. Phase 1
 issues are what stand between the current spike and finn being a
 tool you reach for every day.
 
-**Phase 1 — daily-use blockers:**
-
-* **#1** Discovery: rich-rendering for message bubbles
-  (Markdown? something else?). The current bubble already plays
-  in monospace; this is the layer above. Carries an attached
-  scroll-discipline thread (auto-scroll vs late-arriving
-  approvals / markdown finalisation) since 2026-05-09.
+**Phase 1 — daily-use blockers:** *all closed.* This phase
+represented what stood between the spike and finn being a tool
+you reach for every day. Marker reached on 2026-05-09. See
+§"Closed since the last roadmap refresh" below for the trail.
 
 **Phase 2 — quality-of-life:**
 
@@ -537,14 +558,9 @@ tool you reach for every day.
 * **#26** Channel-create member selection UX (email-client-style
   chips).
 * **#28** Per-channel toggle to auto-approve agent-to-agent
-  mentions.
-* **#43** (open: footer-consistency follow-up) Token-usage
-  display — Part A (streaming status icon ●/✓/⚠) and Part B
-  (per-message token-count footer) both shipped (PRs #44, #50,
-  #51); the issue stays as the meta-thread until the
-  always-on-footer follow-up (commented in #1) lands.
-* **#46** Discovery: Multi-User with SSO and separate creds.
-  Strategic question, not a blocker.
+  mentions. Design pinned in **ADR-0015** (audit modal,
+  loop defences, capability probe, role labels); implementation
+  staged into three PRs.
 
 **Phase 3 — nice-to-have / discovery:**
 
@@ -558,6 +574,12 @@ tool you reach for every day.
   (archived channels missing from the filter).
 * **#49** Discovery: finn artwork in sidebar brand area.
 
+**Unphased / discovery:**
+
+* **#46** Discovery: Multi-User with SSO and separate creds.
+  Strategic question that may reshape the deployment story
+  entirely; not slotted into a phase yet.
+
 Follow-ups under earlier issues:
 
 * SQLite FTS5 / ranked search when LIKE feels slow.
@@ -566,12 +588,21 @@ Follow-ups under earlier issues:
 * Persisted per-user filter preferences (folds into #18).
 * Server-side `~/finn-data/exports/` write alongside the
   browser download.
+* Syntax highlighting in fenced code blocks (ADR-0016 noted as
+  out-of-scope for the rich-rendering pass; own future ADR + PR).
+* Click-through behaviour on `@-mention` spans (member-detail
+  panel; folds into #18-adjacent surfaces).
 
 **Closed since the last roadmap refresh** (2026-05-08–2026-05-09):
 
 * **#3** Token-streaming + reply-sequencing — ADR-0013 phases
   1–3 + post-phase-3 sweep all shipped (PRs #39, #41, #42,
   #45, #47).
+* **#43** Token-usage display — Part A status icon (PR #44),
+  Part B per-message footer (PRs #50, #51), always-on footer
+  consistency follow-up rolled into #1 (PR #58).
+* **#1** Rich-rendering for message bubbles — ADR-0016, PR #58.
+  Closes phase 1.
 * **#52** Manual message forwarding — ADR-0014 (PRs #53, #54).
 * **#23**, **#27**, **#34**, **#36** — see prior daily logs.
 * `#channel` autocomplete in the composer.

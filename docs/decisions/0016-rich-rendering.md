@@ -1,6 +1,6 @@
 # ADR 0016 — Rich rendering for message bubbles
 
-- **Status:** accepted
+- **Status:** accepted; shipped 2026-05-09 as PR #58.
 - **Date:** 2026-05-09
 - **Deciders:** Jürgen, Dixie
 - **Related:** Issue #1 (discovery), ADR-0001 (connector trust
@@ -292,9 +292,10 @@ Out-of-scope follow-ups (each its own future ADR + PR):
   Pre-rich-rendering plain-text bodies that relied on it for
   multi-newline preservation now go through the markdown
   parser, which collapses lone newlines unless `breaks: true`
-  is on (it is). Existing channel history will re-render after
-  the change; expected to look better, but worth eyeballing
-  on first deploy.
+  is on (it is). Existing channel history re-renders after
+  the change. **As-shipped (PR #58, 2026-05-09):** historical
+  bodies render cleanly with `breaks: true`; no surprise
+  artefacts surfaced during Jürgen's testing pass.
 - Every bubble now goes through ~50 KB of gzipped JS at first
   paint. Loaded once per page; not in the per-message hot
   path beyond the parse call itself (which is O(body length)

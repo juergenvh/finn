@@ -4,6 +4,16 @@
 - **Date:** 2026-05-07
 - **Deciders:** Jürgen, Dixie
 - **Supersedes:** —
+- **Amended by:**
+  - **ADR-0014** (2026-05-09) extends the trigger table with
+    user-triggered forwarding (↗ button on a bubble): a second
+    legitimate routing form, lands directly in `routed` status,
+    same audit-row shape.
+  - **ADR-0015** (2026-05-09) extends the trigger table with
+    per-channel auto-approve. The closing invariant below is
+    reworded there: no auto-approve **enabled by default**, no
+    whitelist, opt-in carries a pre-activation audit and built-
+    in loop defences.
 - **Related:** README §"Approval flow"
 
 ## Context
