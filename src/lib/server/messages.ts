@@ -21,6 +21,13 @@ export type RecordAgentMessage = {
 	channelId: string;
 	body: string;
 	agentId: string;
+	/**
+	 * Optional pre-generated message id. Used by the streaming
+	 * dispatcher (ADR-0013) which announces `message_start` with the
+	 * final id *before* the body is known, then writes the row on
+	 * `message_end`. When omitted, a fresh id is minted as before.
+	 */
+	id?: string;
 };
 
 export type RecordSystemMessage = {
@@ -48,7 +55,7 @@ export function recordUserMessage(args: RecordUserMessage): Message {
 export function recordAgentMessage(args: RecordAgentMessage): Message {
 	const db = getDb();
 	const row = {
-		id: newId('message'),
+		id: args.id ?? newId('message'),
 		channelId: args.channelId,
 		senderType: 'agent' as const,
 		senderId: args.agentId,

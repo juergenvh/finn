@@ -20,10 +20,22 @@
  *   inbound  approval_decide  { approval_id, decision, targets?, reject_reason? }
  *   inbound  ping             {}
  *   outbound message          { channel_id, sender, sender_id, body, ts, id }
+ *   outbound message_start    { id, channel_id, sender_id, ts }
+ *   outbound message_delta    { id, delta }
+ *   outbound message_end      { id, body }
+ *   outbound message_error    { id, error }
  *   outbound approval_created { approval, message_id }
  *   outbound approval_updated { approval }
  *   outbound system           { body }
  *   outbound pong             {}
+ *
+ *   The four message_* events form one streaming-message lifecycle
+ *   per agent reply (ADR-0013). User and system messages keep the
+ *   single-event `message` form. During phase 2a of the streaming
+ *   rollout, agent replies are emitted with both shapes (the four
+ *   lifecycle events AND a final `message` event on completion) so
+ *   clients that only know the old shape stay functional. Phase 2b
+ *   drops the legacy compatibility emit.
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
@@ -94,6 +106,51 @@ export type BroadcastMessage = {
 	id: string;
 };
 
+/* --- streaming agent-message lifecycle (ADR-0013) ---
+ *
+ * Each agent reply produced by the streaming dispatcher emits a
+ * `message_start`, zero or more `message_delta` events, and exactly
+ * one of `message_end` (clean) or `message_error` (mid-stream
+ * failure). All four share the same `id`, which is the final
+ * messages-table primary key the row is (or would have been) written
+ * with on completion.
+ */
+
+export type BroadcastMessageStart = {
+	type: 'message_start';
+	/** Final message id; matches the eventual DB row on clean end. */
+	id: string;
+	channel_id: string;
+	/** Agent id; streaming starts only exist for agent messages. */
+	sender_id: string;
+	/** Bubble-rendering timestamp; persisted as `created_at` on end. */
+	ts: number;
+};
+
+export type BroadcastMessageDelta = {
+	type: 'message_delta';
+	/** Matches the corresponding `message_start.id`. */
+	id: string;
+	/** Append to the bubble's body verbatim; UTF-8, no further parsing. */
+	delta: string;
+};
+
+export type BroadcastMessageEnd = {
+	type: 'message_end';
+	/** Matches the corresponding `message_start.id`. */
+	id: string;
+	/** Full final body, in case the client wants to reconcile its buffer. */
+	body: string;
+};
+
+export type BroadcastMessageError = {
+	type: 'message_error';
+	/** Matches the corresponding `message_start.id`. */
+	id: string;
+	/** Human-readable error; not a stable contract. */
+	error: string;
+};
+
 export type BroadcastApprovalCreated = {
 	type: 'approval_created';
 	approval: ApprovalSnapshot;
@@ -124,6 +181,10 @@ export type BroadcastStateChanged = {
 
 export type FinnOutbound =
 	| BroadcastMessage
+	| BroadcastMessageStart
+	| BroadcastMessageDelta
+	| BroadcastMessageEnd
+	| BroadcastMessageError
 	| BroadcastApprovalCreated
 	| BroadcastApprovalUpdated
 	| BroadcastStateChanged
@@ -139,7 +200,15 @@ export type FinnOutbound =
  * complete — the chat feels live instead of arriving in batches.
  */
 export type Emit = (
-	event: BroadcastMessage | BroadcastApprovalCreated | BroadcastApprovalUpdated | BroadcastSystem
+	event:
+		| BroadcastMessage
+		| BroadcastMessageStart
+		| BroadcastMessageDelta
+		| BroadcastMessageEnd
+		| BroadcastMessageError
+		| BroadcastApprovalCreated
+		| BroadcastApprovalUpdated
+		| BroadcastSystem
 ) => void;
 
 export interface FinnHooks {

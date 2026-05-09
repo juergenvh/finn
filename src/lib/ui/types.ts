@@ -44,6 +44,38 @@ export type WSStateChanged = {
 	extra?: Record<string, string | number | boolean | null>;
 };
 
+/* --- streaming agent-message lifecycle (ADR-0013) ---
+ *
+ * Mirrors the wire shapes from `lib/server/ws/attach.ts`. Each agent
+ * reply emits one `message_start`, zero or more `message_delta`s, and
+ * either one `message_end` (clean) or one `message_error` (failure).
+ * During phase 2a of the rollout the server *additionally* emits a
+ * legacy `message` event on completion; the client does not yet rely
+ * on the streaming events, so existing handling keeps working.
+ */
+export type WSMessageStart = {
+	type: 'message_start';
+	id: string;
+	channel_id: string;
+	sender_id: string;
+	ts: number;
+};
+export type WSMessageDelta = {
+	type: 'message_delta';
+	id: string;
+	delta: string;
+};
+export type WSMessageEnd = {
+	type: 'message_end';
+	id: string;
+	body: string;
+};
+export type WSMessageError = {
+	type: 'message_error';
+	id: string;
+	error: string;
+};
+
 export type WSInbound =
 	| {
 			type: 'message';
@@ -54,6 +86,10 @@ export type WSInbound =
 			ts: number;
 			id: string;
 	  }
+	| WSMessageStart
+	| WSMessageDelta
+	| WSMessageEnd
+	| WSMessageError
 	| { type: 'approval_created'; approval: ApprovalSnapshot; message_id: string }
 	| { type: 'approval_updated'; approval: ApprovalSnapshot }
 	| WSStateChanged
