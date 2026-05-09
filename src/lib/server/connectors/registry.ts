@@ -1,27 +1,34 @@
 /**
  * Connector registry — DB-driven dispatch.
  *
- * Two entry points:
+ * Two entry points, both streaming (ADR-0013 phases 2 + 3):
  *
  *   streamUserMessage(args, emit)
  *     Fans out to enabled member agents of the channel and streams
  *     each agent's reply through `emit` as a
- *     `message_start` / `message_delta` / `message_end` lifecycle
- *     (ADR-0013). If the body contains `@-mentions`, only the
- *     mentioned agents that resolve to channel members are
- *     dispatched (issue #27); otherwise the full member list is
- *     fanned out. User messages do not require approval (ADR-0005
- *     §1). Returns a `StreamDispatchResult` with the diagnostics
- *     and a per-agent outcome list (final body or error message);
- *     the caller uses this to drive approval-creation on completed
- *     replies and to surface unresolved-mention warnings.
+ *     `message_start` / `message_delta` / `message_end` lifecycle.
+ *     If the body contains `@-mentions`, only the mentioned agents
+ *     that resolve to channel members are dispatched (issue #27);
+ *     otherwise the full member list is fanned out. User messages
+ *     do not require approval (ADR-0005 §1). Returns a
+ *     `StreamDispatchResult` with the diagnostics and a per-agent
+ *     outcome list (final body or error message); the caller uses
+ *     this to drive approval-creation on completed replies and to
+ *     surface unresolved-mention warnings.
  *
- *   dispatchToAgent(agent_id, channel_id, body)
- *     Routes a single message to one specific agent. This is what
- *     the approval flow calls during the `approved` → `routed`
- *     transition (one call per target; the row moves to `routed`
- *     after all calls have settled). Still uses the non-streaming
- *     `send` path; phase 3 of ADR-0013 will switch this too.
+ *   streamToAgent(args, emit)
+ *     Streams the original agent message to one specific target
+ *     agent. Used by the approval-routing path after the user
+ *     clicks Approve. The body is the *original* agent message —
+ *     finn does not paraphrase or annotate; it relays verbatim.
+ *     Same per-agent stream lifecycle (`message_start` /
+ *     `message_delta` / `message_end` or `message_error`) as
+ *     `streamUserMessage`. Returns a single
+ *     `StreamedDispatchedReply` on clean termination, or an
+ *     `{ agentId, messageId, error }` shape on failure; the
+ *     receiving agent's reply itself becomes a regular agent
+ *     message in the channel and may trigger its own approval if
+ *     it mentions yet another agent.
  */
 
 import { and, eq, isNull } from 'drizzle-orm';
@@ -249,6 +256,55 @@ type StreamEmit = (
 ) => void;
 
 /**
+ * Per-agent streaming pipeline — the shared core of
+ * `streamUserMessage` (multi-recipient fan-out) and
+ * `streamToAgent` (single-recipient relay).
+ *
+ * Mints a fresh message id, emits `message_start`, iterates the
+ * connector's `streamReply` (one `message_delta` per yielded chunk
+ * accumulating the body), and emits exactly one of `message_end`
+ * (clean) or `message_error` (mid-flight failure). Returns the
+ * per-agent outcome shape for the caller to persist or surface.
+ */
+async function streamOneAgent(
+	agent: MemberAgent,
+	channelId: string,
+	body: string,
+	emit: StreamEmit
+): Promise<StreamedDispatchedReply | { agentId: string; messageId: string; error: string }> {
+	const messageId = newId('message');
+	const startedAt = Date.now();
+	emit({
+		type: 'message_start',
+		id: messageId,
+		channel_id: channelId,
+		sender_id: agent.id,
+		ts: startedAt
+	});
+
+	let fullBody = '';
+	try {
+		const stream = streamConnector(agent, channelId, body);
+		for await (const chunk of stream) {
+			if (typeof chunk !== 'string' || chunk.length === 0) continue;
+			fullBody += chunk;
+			emit({ type: 'message_delta', id: messageId, delta: chunk });
+		}
+
+		if (fullBody.length === 0) {
+			throw new Error('connector stream ended with no content');
+		}
+
+		emit({ type: 'message_end', id: messageId, body: fullBody });
+		return { agentId: agent.id, messageId, body: fullBody };
+	} catch (err) {
+		const error = (err as Error).message ?? String(err);
+		emit({ type: 'message_error', id: messageId, error });
+		return { agentId: agent.id, messageId, error };
+	}
+}
+
+/**
  * Stream a user message to all recipient agents in parallel.
  *
  * For each recipient the dispatcher:
@@ -291,38 +347,9 @@ export async function streamUserMessage(
 	} = resolveRecipients(args.channel_id, args.body, members);
 
 	const replies: StreamDispatchResult['replies'] = await Promise.all(
-		recipients.map(async (agent) => {
-			const messageId = newId('message');
-			const startedAt = Date.now();
-			emit({
-				type: 'message_start',
-				id: messageId,
-				channel_id: args.channel_id,
-				sender_id: agent.id,
-				ts: startedAt
-			});
-
-			let fullBody = '';
-			try {
-				const stream = streamConnector(agent, args.channel_id, args.body);
-				for await (const chunk of stream) {
-					if (typeof chunk !== 'string' || chunk.length === 0) continue;
-					fullBody += chunk;
-					emit({ type: 'message_delta', id: messageId, delta: chunk });
-				}
-
-				if (fullBody.length === 0) {
-					throw new Error('connector stream ended with no content');
-				}
-
-				emit({ type: 'message_end', id: messageId, body: fullBody });
-				return { agentId: agent.id, messageId, body: fullBody };
-			} catch (err) {
-				const error = (err as Error).message ?? String(err);
-				emit({ type: 'message_error', id: messageId, error });
-				return { agentId: agent.id, messageId, error };
-			}
-		})
+		recipients.map((agent) =>
+			streamOneAgent(agent, args.channel_id, args.body, emit)
+		)
 	);
 
 	return {
@@ -336,20 +363,31 @@ export async function streamUserMessage(
 }
 
 /**
- * Deliver an approved message to one specific target agent. Used by
- * the approval-routing path after the user clicks Approve. The body
- * is the *original* agent message — finn does not paraphrase or
- * annotate; it relays verbatim.
+ * Stream the original agent message to one specific target agent.
+ * Used by the approval-routing path after the user clicks Approve
+ * (one call per target, run in parallel by the caller; the
+ * approval row transitions to `routed` once every target's stream
+ * has terminated, clean or with error).
  *
- * Returns the receiving agent's reply, which itself becomes a
- * regular agent message in the channel (and may trigger its own
- * approval if it mentions yet another agent).
+ * The receiving agent's reply itself becomes a regular agent
+ * message in the channel and may trigger its own approval if it
+ * mentions yet another agent.
+ *
+ * Same per-agent stream lifecycle as `streamUserMessage`'s
+ * recipients: emits `message_start` / one or more `message_delta`s
+ * / `message_end` (clean) or `message_error` (failure) through
+ * `emit`, with a pre-allocated message id that the caller uses to
+ * persist the row on `message_end` so the DB primary key matches
+ * the streamed events.
  */
-export async function dispatchToAgent(args: {
-	agent_id: string;
-	channel_id: string;
-	body: string;
-}): Promise<DispatchedReply> {
+export async function streamToAgent(
+	args: {
+		agent_id: string;
+		channel_id: string;
+		body: string;
+	},
+	emit: StreamEmit
+): Promise<StreamedDispatchedReply | { agentId: string; messageId: string; error: string }> {
 	requireChannel(args.channel_id);
 
 	const db = getDb();
@@ -378,6 +416,5 @@ export async function dispatchToAgent(args: {
 		);
 	}
 
-	const reply = await callConnector(member, args.channel_id, args.body);
-	return { agentId: member.id, body: reply };
+	return streamOneAgent(member, args.channel_id, args.body, emit);
 }
