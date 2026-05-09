@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { renderMarkdown } from './markdown';
 	import type { AgentInfo, ApprovalSnapshot, TokenUsage } from './types';
 
 	type Props = {
@@ -115,6 +116,38 @@
 	 * author if they really want to (rare, but no reason to block). */
 	const forwardable = $derived(
 		sender !== 'system' && !streaming && typeof onForward === 'function'
+	);
+
+	/* Markdown rendering (ADR-0016).
+	 *
+	 * Same pipeline for user and agent bubbles — the sanitizer is
+	 * the safety control, not the source. System messages stay plain
+	 * (finn-authored, no markdown to interpret).
+	 *
+	 * While streaming, we deliberately do NOT render markdown: the
+	 * body is mid-construction, half-open code fences and dangling
+	 * list markers would render badly. Plain text + cursor in that
+	 * state matches ADR-0013's "plain-while-streaming, finalised on
+	 * end" strategy. The markdown-finalisation is what triggers the
+	 * ResizeObserver scroll discipline (handled in +page.svelte). */
+	const renderedBody = $derived.by(() => {
+		if (sender === 'system') return null;
+		if (streaming) return null;
+		if (!body) return '';
+		return renderMarkdown(body, members);
+	});
+
+	/* Always-on footer for agent bubbles (ADR-0016 §9).
+	 *
+	 * Renders 'tokens: —' when the upstream did not surface usage,
+	 * so the bubble shape stays consistent across backends. Hidden
+	 * during streaming (usage arrives at message_end). User and
+	 * system bubbles still have no footer. */
+	const showFooter = $derived(sender === 'agent' && !streaming);
+	const tokenTooltip = $derived(
+		tokens
+			? 'input → output tokens reported by the upstream backend'
+			: 'this backend does not report usage'
 	);
 
 	/**
@@ -298,8 +331,14 @@
 			</div>
 		{/if}
 
-		<div class="body">
-			{#if body}{body}{/if}{#if streaming}<span class="cursor" aria-hidden="true">▌</span>{/if}
+		<div class="body" class:body-plain={renderedBody === null} class:body-rich={renderedBody !== null}>
+			{#if renderedBody === null}
+				<!-- system messages and streaming bubbles render plain -->
+				{#if body}{body}{/if}{#if streaming}<span class="cursor" aria-hidden="true">▌</span>{/if}
+			{:else}
+				<!-- markdown-rendered bodies; sanitized via DOMPurify in markdown.ts -->
+				{@html renderedBody}
+			{/if}
 		</div>
 		{#if error}
 			<div class="error-line" role="alert">
@@ -307,21 +346,25 @@
 			</div>
 		{/if}
 
-		{#if tokens && !streaming}
+		{#if showFooter}
 			<!--
-				Footer sub-line for per-message metadata. Currently only
-				hosts the token-usage counters; future tenants (model
-				name, latency, relay path, etc.) plug in here so the
-				header stays focused on identity + state.
+				Always-on footer for agent bubbles (ADR-0016 §9). Hosts
+				per-message metadata; renders 'tokens: —' when the
+				backend doesn't report usage so the bubble shape stays
+				consistent. Future tenants (model name, latency, relay
+				path) plug in alongside without further restructuring.
 
-				Hidden while streaming — the upstream's usage block
-				arrives at message_end, never mid-stream, so showing 0/0
-				earlier would be misleading.
+				Hidden while streaming — usage arrives at message_end,
+				never mid-stream.
 			-->
 			<div class="footer" aria-label="message metadata">
-				<span class="footer-item" title="input → output tokens reported by the upstream backend">
-					tokens: {tokens.total}
-					<span class="tokens-detail">(<span class="tok-arrow" aria-label="input">↓</span>{tokens.input}, <span class="tok-arrow" aria-label="output">↑</span>{tokens.output})</span>
+				<span class="footer-item" title={tokenTooltip}>
+					{#if tokens}
+						tokens: {tokens.total}
+						<span class="tokens-detail">(<span class="tok-arrow" aria-label="input">↓</span>{tokens.input}, <span class="tok-arrow" aria-label="output">↑</span>{tokens.output})</span>
+					{:else}
+						tokens: <span class="tokens-detail">—</span>
+					{/if}
 				</span>
 			</div>
 		{/if}
@@ -655,7 +698,6 @@
 	}
 
 	.body {
-		white-space: pre-wrap;
 		word-break: break-word;
 		/* Conversation body in a console-leaning monospace stack.
 		 * Header, approval controls, and system notices stay in the
@@ -678,6 +720,154 @@
 			monospace;
 		font-size: 0.8rem;
 		line-height: 1.45;
+	}
+
+	/* Plain-text path: streaming bubbles and system messages.
+	 * Preserves explicit newlines from the body string verbatim. */
+	.body-plain {
+		white-space: pre-wrap;
+	}
+
+	/* Rich-rendered path: post-markdown HTML. The renderer owns
+	 * whitespace from here (single newlines became <br>, double
+	 * became <p>); fenced code blocks get inner pre-whitespace
+	 * via the global rules below.
+	 *
+	 * The `:global()` wrapper is required because the markdown
+	 * pipeline injects elements via {@html}; Svelte's scoped
+	 * style hashes never get applied to those nodes. The cost is
+	 * that these selectors leak globally, but the .body-rich
+	 * scope keeps each rule local enough not to collide with
+	 * anything else on the page. */
+	.body-rich :global(p) {
+		margin: 0 0 0.5em;
+	}
+	.body-rich :global(p:last-child) {
+		margin-bottom: 0;
+	}
+	.body-rich :global(strong) {
+		font-weight: 700;
+		color: #f1f5f9;
+	}
+	.body-rich :global(em) {
+		font-style: italic;
+	}
+	.body-rich :global(del) {
+		text-decoration: line-through;
+		opacity: 0.7;
+	}
+	.body-rich :global(a) {
+		color: #38bdf8;
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+	.body-rich :global(a:hover) {
+		color: #7dd3fc;
+	}
+
+	/* Inline code: subtle background, no border. Matches the
+	 * surrounding body monospace stack so the only visual cue is
+	 * the background swatch. */
+	.body-rich :global(code) {
+		background: rgba(255, 255, 255, 0.06);
+		padding: 0.05em 0.3em;
+		border-radius: 3px;
+		font-size: 0.95em;
+	}
+
+	/* Fenced code blocks: distinct background block, internal
+	 * <pre> whitespace so multi-line code keeps its formatting,
+	 * horizontal scroll for over-wide lines (no soft-wrap on code
+	 * — wrapping a JSON line mid-string is misleading). */
+	.body-rich :global(pre) {
+		background: rgba(0, 0, 0, 0.35);
+		padding: 0.55em 0.75em;
+		border-radius: 5px;
+		margin: 0.5em 0;
+		overflow-x: auto;
+		line-height: 1.4;
+	}
+	.body-rich :global(pre code) {
+		background: transparent;
+		padding: 0;
+		border-radius: 0;
+		white-space: pre;
+		display: block;
+	}
+
+	.body-rich :global(ul),
+	.body-rich :global(ol) {
+		margin: 0.4em 0;
+		padding-left: 1.4em;
+	}
+	.body-rich :global(li) {
+		margin: 0.15em 0;
+	}
+	.body-rich :global(li > p) {
+		/* Multi-paragraph list items: kill the default top-margin
+		 * on the first <p> so the bullet aligns with text. */
+		margin: 0 0 0.4em;
+	}
+
+	.body-rich :global(blockquote) {
+		margin: 0.5em 0;
+		padding: 0.1em 0.75em;
+		border-left: 3px solid #475569;
+		color: #cbd5e1;
+		font-style: italic;
+	}
+
+	.body-rich :global(h1),
+	.body-rich :global(h2),
+	.body-rich :global(h3),
+	.body-rich :global(h4),
+	.body-rich :global(h5),
+	.body-rich :global(h6) {
+		margin: 0.5em 0 0.3em;
+		font-weight: 600;
+		color: #f1f5f9;
+	}
+	.body-rich :global(h1) { font-size: 1.15em; }
+	.body-rich :global(h2) { font-size: 1.08em; }
+	.body-rich :global(h3) { font-size: 1.0em;  }
+	.body-rich :global(h4),
+	.body-rich :global(h5),
+	.body-rich :global(h6) { font-size: 0.95em; }
+
+	.body-rich :global(table) {
+		border-collapse: collapse;
+		margin: 0.5em 0;
+		font-size: 0.95em;
+	}
+	.body-rich :global(th),
+	.body-rich :global(td) {
+		border: 1px solid #2a2a30;
+		padding: 0.25em 0.5em;
+		text-align: left;
+	}
+	.body-rich :global(th) {
+		background: rgba(255, 255, 255, 0.04);
+		font-weight: 600;
+	}
+	.body-rich :global(hr) {
+		border: 0;
+		border-top: 1px solid #2a2a30;
+		margin: 0.7em 0;
+	}
+
+	/* Mention spans (post-process from markdown.ts). Subtle
+	 * accent colour matching the existing mention-popup style;
+	 * no underline so they don't compete with regular markdown
+	 * links. */
+	.body-rich :global(span.mention) {
+		color: #38bdf8;
+		background: rgba(56, 189, 248, 0.12);
+		padding: 0 0.25em;
+		border-radius: 3px;
+		font-weight: 500;
+	}
+	.body-rich :global(span.mention:hover) {
+		background: rgba(56, 189, 248, 0.22);
 	}
 
 	.approval {

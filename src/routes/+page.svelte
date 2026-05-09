@@ -167,39 +167,101 @@
 	 * older messages so the user's scroll position is preserved. */
 	let suppressNextScroll = false;
 
-	async function scrollToBottom() {
-		if (suppressNextScroll) {
-			suppressNextScroll = false;
-			return;
-		}
-		await tick();
-		if (messageScroller) {
-			messageScroller.scrollTop = messageScroller.scrollHeight;
-		}
+	/**
+	 * Pixels from the bottom within which we still consider the user
+	 * "at the bottom". Above this, the user has deliberately scrolled
+	 * up to read history and we leave them there — don't fight them.
+	 * (ADR-0016 §8.) */
+	const BOTTOM_THRESHOLD_PX = 50;
+
+	function isUserAtBottom(scroller: HTMLElement): boolean {
+		const dist = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+		return dist <= BOTTOM_THRESHOLD_PX;
+	}
+
+	function snapToBottom(scroller: HTMLElement): void {
+		scroller.scrollTop = scroller.scrollHeight;
 	}
 
 	/**
-	 * Auto-scroll trigger.
+	 * Scroll discipline (ADR-0016 §8).
 	 *
-	 * Re-runs whenever the active channel's message list changes
-	 * length OR the tail message's body grows mid-stream. The first
-	 * covers ordinary inserts (`message`, `message_start`); the
-	 * second covers `message_delta` events that grow an existing
-	 * tail bubble in place — without it, the scroll position would
-	 * stick at the cursor's original spot and the streaming text
-	 * would scroll out of view.
+	 * One ResizeObserver on the messages-container. Any layout change
+	 * that grows scrollHeight — streaming deltas, message_end
+	 * markdown finalisation, late approval_created adding buttons
+	 * below a settled bubble, image loads, font swaps — reaches us
+	 * here. If the user was at-or-near the bottom (<=50 px), we snap
+	 * to the new bottom; if they had scrolled up, we leave them.
 	 *
-	 * The `void` calls make the read-for-tracking explicit; the
-	 * actual scroll work happens once after `tick()`.
+	 * Replaces the per-event scroll trigger that previously tracked
+	 * messagesByChannel.length and tail.body.length — that approach
+	 * missed approval_created (mutates approvalsByMessage, not
+	 * messages) and missed bubble-shape changes that don't change a
+	 * length (markdown finalisation, footer addition).
+	 *
+	 * `suppressNextScroll` is retained for the load-older path — a
+	 * deliberate scroll-position preservation that should override
+	 * the auto-snap for one observer firing.
+	 */
+	$effect(() => {
+		const scroller = messageScroller;
+		if (!scroller) return;
+		if (typeof ResizeObserver === 'undefined') return;
+
+		let wasAtBottom = true;
+
+		const trackPosition = () => {
+			wasAtBottom = isUserAtBottom(scroller);
+		};
+		scroller.addEventListener('scroll', trackPosition, { passive: true });
+
+		const observer = new ResizeObserver(() => {
+			if (suppressNextScroll) {
+				suppressNextScroll = false;
+				wasAtBottom = isUserAtBottom(scroller);
+				return;
+			}
+			if (wasAtBottom) {
+				snapToBottom(scroller);
+			}
+		});
+
+		// Observe both the scroller (height changes from window
+		// resize) and its scrollable child container so internal
+		// growth (new bubbles, taller bubbles) reaches us.
+		observer.observe(scroller);
+		for (const child of Array.from(scroller.children)) {
+			if (child instanceof HTMLElement) observer.observe(child);
+		}
+
+		return () => {
+			scroller.removeEventListener('scroll', trackPosition);
+			observer.disconnect();
+		};
+	});
+
+	/**
+	 * Initial scroll on channel switch. The ResizeObserver above
+	 * handles ongoing growth, but a freshly-loaded channel needs a
+	 * one-shot snap-to-bottom: the scroller already exists, the
+	 * messages just landed inside it, so the observer fires — but
+	 * `wasAtBottom` was sampled while the previous channel's content
+	 * was still showing, and may have been false. Force the snap on
+	 * activeChannel change to give the user the standard
+	 * "land at the latest message" experience.
 	 */
 	$effect(() => {
 		if (!activeChannelId) return;
+		const scroller = messageScroller;
+		if (!scroller) return;
+		// Read the message list to register dependency — fires when
+		// the channel's first messages land too.
 		const list = messagesByChannel[activeChannelId];
 		if (!list) return;
 		void list.length;
-		const tail = list[list.length - 1];
-		if (tail && tail.streaming) void tail.body.length;
-		void scrollToBottom();
+		void tick().then(() => {
+			if (!suppressNextScroll) snapToBottom(scroller);
+		});
 	});
 
 	/* ---------- derived: visible messages ---------- */
