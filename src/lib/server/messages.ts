@@ -28,6 +28,15 @@ export type RecordAgentMessage = {
 	 * `message_end`. When omitted, a fresh id is minted as before.
 	 */
 	id?: string;
+	/**
+	 * Optional token-usage counters captured from the upstream
+	 * stream's final `usage` block (issue #43 part B). When set,
+	 * the row is written with `tokens_json` JSON-encoded; when null
+	 * or omitted, `tokens_json` stays NULL. Backends that don't
+	 * surface usage (Wintermute today, `anthropic-stub`) simply
+	 * never set this.
+	 */
+	tokens?: { input: number; output: number; total: number } | null;
 };
 
 export type RecordSystemMessage = {
@@ -46,7 +55,8 @@ export function recordUserMessage(args: RecordUserMessage): Message {
 		createdAt: Date.now(),
 		parentMessageId: null,
 		hiddenAt: null,
-		hiddenBy: null
+		hiddenBy: null,
+		tokensJson: null
 	};
 	db.insert(messages).values(row).run();
 	return row;
@@ -63,7 +73,8 @@ export function recordAgentMessage(args: RecordAgentMessage): Message {
 		createdAt: Date.now(),
 		parentMessageId: null,
 		hiddenAt: null,
-		hiddenBy: null
+		hiddenBy: null,
+		tokensJson: args.tokens ? JSON.stringify(args.tokens) : null
 	};
 	db.insert(messages).values(row).run();
 	return row;
@@ -80,7 +91,8 @@ export function recordSystemMessage(args: RecordSystemMessage): Message {
 		createdAt: Date.now(),
 		parentMessageId: null,
 		hiddenAt: null,
-		hiddenBy: null
+		hiddenBy: null,
+		tokensJson: null
 	};
 	db.insert(messages).values(row).run();
 	return row;

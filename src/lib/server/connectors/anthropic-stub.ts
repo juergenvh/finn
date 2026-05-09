@@ -21,6 +21,7 @@ import type { z } from 'zod';
 
 // Mirror the OpenclawConfig shape pattern, but minimal.
 import { z as zod } from 'zod';
+import type { SseEvent } from './sse-parser.ts';
 
 export const AnthropicStubConfigSchema = zod.object({
 	connector_type: zod.literal('anthropic-stub'),
@@ -50,13 +51,17 @@ function pickReply(args: AnthropicStubStreamArgs): string {
  * Yield the canned reply in a single chunk after a tiny
  * artificial latency, so the UI gets to render the user message
  * before the reply lands and the stream lifecycle feels real.
+ *
+ * Does not emit a `usage` event — the stub is not a real LLM
+ * call, so reporting fabricated counters would be misleading.
+ * The dispatcher persists the row with a NULL `tokens_json`.
  */
 async function* streamReply(
 	args: AnthropicStubStreamArgs
-): AsyncGenerator<string, void, void> {
+): AsyncGenerator<SseEvent, void, void> {
 	const reply = pickReply(args);
 	await new Promise((r) => setTimeout(r, 80));
-	yield reply;
+	yield { kind: 'delta', text: reply };
 }
 
 export const anthropicStubConnector = { streamReply };

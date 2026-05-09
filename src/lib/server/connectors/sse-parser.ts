@@ -5,9 +5,10 @@
  * Wintermute `/v1/chat/completions` adapter (and any other
  * OpenAI-compatible backend with `stream: true`) deliver responses
  * as a sequence of `data: {json}\n\n` frames terminated by
- * `data: [DONE]`. This module parses those frames and yields the
- * content delta strings, hiding all wire-format gymnastics from
- * the caller.
+ * `data: [DONE]`. This module parses those frames and yields a
+ * discriminated union (— see `SseEvent`) of content deltas and
+ * the optional final `usage` block, hiding all wire-format
+ * gymnastics from the caller.
  *
  * Why not pull in `eventsource-parser` or similar:
  *   - Our needs are exactly two: split on the SSE frame boundary
@@ -47,11 +48,47 @@
 
 const SSE_DONE = '[DONE]';
 
+/**
+ * Token usage block reported by the upstream stream.
+ *
+ * Mirrors OpenAI's `chat.completion.chunk.usage` shape (and
+ * Anthropic's, when passed through OpenClaw): all three counters
+ * are non-negative integers. Backends that omit usage simply
+ * never emit a `usage`-bearing frame, and the parser never
+ * yields a `{ kind: 'usage' }` event for that stream.
+ */
+export type UsageReport = {
+	input: number;
+	output: number;
+	total: number;
+};
+
+/**
+ * Discriminated union yielded by `parseSseStream`.
+ *
+ * - `delta`: one content fragment, append-to-body verbatim. The
+ *   stream may emit zero or more of these.
+ * - `usage`: the upstream's final token-usage block. Emitted at
+ *   most once per stream, and only by backends that surface
+ *   usage on their SSE wire (OpenClaw → Anthropic / Ollama; not
+ *   Wintermute today). Order with respect to `delta` events is
+ *   not guaranteed — typically it arrives in the last frame
+ *   before `[DONE]`, but the parser does not enforce that.
+ */
+export type SseEvent =
+	| { kind: 'delta'; text: string }
+	| { kind: 'usage'; usage: UsageReport };
+
 type OpenAIStreamFrame = {
 	choices?: Array<{
 		delta?: { role?: string; content?: string };
 		finish_reason?: string | null;
 	}>;
+	usage?: {
+		prompt_tokens?: number;
+		completion_tokens?: number;
+		total_tokens?: number;
+	};
 };
 
 /**
@@ -72,7 +109,7 @@ type OpenAIStreamFrame = {
  */
 export async function* parseSseStream(
 	body: ReadableStream<Uint8Array> | null
-): AsyncGenerator<string, void, void> {
+): AsyncGenerator<SseEvent, void, void> {
 	if (!body) {
 		throw new Error('streaming response had no body');
 	}
@@ -80,8 +117,7 @@ export async function* parseSseStream(
 	const reader = body.getReader();
 	const decoder = new TextDecoder('utf-8');
 	let buffer = '';
-	let yieldedAny = false;
-	let sawDone = false;
+	let yieldedAnyDelta = false;
 
 	try {
 		while (true) {
@@ -100,16 +136,13 @@ export async function* parseSseStream(
 				// length).
 				buffer = buffer.slice(boundary + frameLen(buffer, boundary));
 
-				const yieldedFromFrame = yield* processFrame(frameRaw);
-				if (yieldedFromFrame === 'done') {
-					sawDone = true;
+				const outcome = yield* processFrame(frameRaw);
+				if (outcome === 'done') {
 					// Drain any remaining buffer; further frames
 					// after [DONE] are non-conformant and ignored.
 					return;
 				}
-				if (yieldedFromFrame === 'yielded') {
-					yieldedAny = true;
-				}
+				if (outcome === 'delta') yieldedAnyDelta = true;
 			}
 		}
 
@@ -121,38 +154,43 @@ export async function* parseSseStream(
 		// Flush whatever's left in `buffer` first in case the last
 		// frame had no trailing blank line.
 		if (buffer.trim().length > 0) {
-			const yielded = yield* processFrame(buffer);
-			if (yielded === 'yielded') yieldedAny = true;
+			const outcome = yield* processFrame(buffer);
+			if (outcome === 'delta') yieldedAnyDelta = true;
 		}
-		if (!yieldedAny) {
+		if (!yieldedAnyDelta) {
 			throw new Error('streaming response ended without producing content');
 		}
 		// else: silent end-of-stream is acceptable.
 	} finally {
 		reader.releaseLock();
-		// Suppress unused-variable warning; sawDone is read above
-		// for the early-return case but TS doesn't notice.
-		void sawDone;
 	}
 }
 
 /**
- * Process one raw SSE frame. Yields content deltas as strings.
+ * Process one raw SSE frame. Yields zero or more `SseEvent`s.
  *
  * Returns:
- *   - `'done'`  when the frame is `data: [DONE]`. Caller should
- *     stop reading.
- *   - `'yielded'` when at least one content delta was yielded.
- *   - `'skipped'` when the frame had no content (role-opener,
- *     finish-marker without content, malformed JSON, comment,
- *     blank).
+ *   - `'done'`    when the frame is `data: [DONE]`. Caller
+ *                 should stop reading.
+ *   - `'delta'`   when a content delta was yielded.
+ *   - `'usage'`   when only a usage block was yielded (no
+ *                 content delta in this frame).
+ *   - `'skipped'` when the frame had nothing yieldable
+ *                 (role-opener, finish-marker without content,
+ *                 malformed JSON, comment, blank).
  *
  * Throws when the frame carries `finish_reason: "error"` so the
  * caller surfaces a `message_error` rather than a quiet stop.
+ *
+ * A single frame can carry both a content delta and a usage
+ * block (some backends pack the final token's content + usage
+ * into one frame). Both are yielded; the return code is
+ * `'delta'` in that case so the caller's "did we ever see
+ * content?" book-keeping stays correct.
  */
 async function* processFrame(
 	frameRaw: string
-): AsyncGenerator<string, 'done' | 'yielded' | 'skipped', void> {
+): AsyncGenerator<SseEvent, 'done' | 'delta' | 'usage' | 'skipped', void> {
 	const frame = frameRaw.trim();
 	if (frame.length === 0) return 'skipped';
 	if (frame.startsWith(':')) return 'skipped'; // SSE comment
@@ -189,10 +227,33 @@ async function* processFrame(
 		throw new Error(`upstream stream error: ${delta ?? '(no detail)'}`);
 	}
 
+	let yieldedDelta = false;
 	if (typeof delta === 'string' && delta.length > 0) {
-		yield delta;
-		return 'yielded';
+		yield { kind: 'delta', text: delta };
+		yieldedDelta = true;
 	}
+
+	// Usage may appear on its own frame (typical OpenAI shape) or
+	// piggy-backed on the final content frame (some adapters).
+	const usageRaw = parsed.usage;
+	if (
+		usageRaw &&
+		typeof usageRaw.prompt_tokens === 'number' &&
+		typeof usageRaw.completion_tokens === 'number' &&
+		typeof usageRaw.total_tokens === 'number'
+	) {
+		yield {
+			kind: 'usage',
+			usage: {
+				input: usageRaw.prompt_tokens,
+				output: usageRaw.completion_tokens,
+				total: usageRaw.total_tokens
+			}
+		};
+		if (!yieldedDelta) return 'usage';
+	}
+
+	if (yieldedDelta) return 'delta';
 	return 'skipped';
 }
 

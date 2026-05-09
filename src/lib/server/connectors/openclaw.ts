@@ -60,7 +60,7 @@
  */
 
 import type { OpenclawConfig } from '../db/agent-config.ts';
-import { parseSseStream } from './sse-parser.ts';
+import { parseSseStream, type SseEvent } from './sse-parser.ts';
 
 /**
  * Scope set finn declares on every OpenClaw request.
@@ -162,7 +162,7 @@ export type OpenclawStreamArgs = {
  */
 async function* streamReply(
 	args: OpenclawStreamArgs
-): AsyncGenerator<string, void, void> {
+): AsyncGenerator<SseEvent, void, void> {
 	const { base_url: baseUrl, model, token_env_var: tokenEnvVar } = args.config;
 	const apiKey = process.env[tokenEnvVar] ?? '';
 
