@@ -96,6 +96,40 @@ export function decideApproval(approvalId: string, decision: ApprovalDecision): 
 	}
 }
 
+/**
+ * Create an approval row that bypasses the pending→approved stages
+ * and starts directly in `routed`. Used by the user-triggered
+ * forward path (issue #52): the user's deliberate forward click
+ * *is* the human-in-the-loop approval; a second confirmation
+ * would be redundant.
+ *
+ * The row exists for audit/protocol-viewer continuity — forwards
+ * leave the same paper trail as a regular pending→approved→routed
+ * approval, and any code that reads the approvals table
+ * (protocol viewer, message export) treats them uniformly.
+ *
+ * `decidedAt` is set to creation time so the audit answer to
+ * "when was this routed?" is unambiguous.
+ */
+export function createRoutedApproval(args: {
+	messageId: string;
+	targets: string[];
+}): Approval {
+	const db = getDb();
+	const now = Date.now();
+	const row = {
+		id: newId('approval'),
+		messageId: args.messageId,
+		status: 'routed' as const,
+		targetedAgentIds: JSON.stringify(args.targets),
+		rejectReason: null,
+		createdAt: now,
+		decidedAt: now
+	};
+	db.insert(approvals).values(row).run();
+	return row;
+}
+
 /** Mark an approved row as fully routed (all outbound calls done). */
 export function markRouted(approvalId: string): Approval {
 	const db = getDb();

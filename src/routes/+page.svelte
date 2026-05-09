@@ -646,6 +646,26 @@
 		);
 	}
 
+	/**
+	 * Manually forward an existing message to one or more channel-
+	 * member agents (issue #52). Skips the pending approval stage
+	 * server-side; the user's deliberate confirm click *is* the
+	 * approval. The originating bubble will get a `routed`
+	 * approval row attached to it for audit, plus the regular
+	 * per-target streaming bubbles for each forwarded reply.
+	 */
+	function forwardMessage(messageId: string, targetAgentIds: string[]) {
+		if (!ws || ws.readyState !== WebSocket.OPEN) return;
+		if (targetAgentIds.length === 0) return;
+		ws.send(
+			JSON.stringify({
+				type: 'forward_message',
+				message_id: messageId,
+				target_agent_ids: targetAgentIds
+			})
+		);
+	}
+
 	function onComposerKey(e: KeyboardEvent) {
 		// Mention popup navigation comes first.
 		if (mentionCtx && mentionCandidates.length > 0) {
@@ -1059,6 +1079,7 @@
 						decideApproval(approval.id, decision, targets, reason);
 					}}
 					onSetHidden={(h) => void setMessageHidden(m.id, h)}
+					onForward={(targets) => forwardMessage(m.id, targets)}
 				/>
 			{/each}
 		</main>

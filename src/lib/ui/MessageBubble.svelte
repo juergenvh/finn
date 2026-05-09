@@ -28,6 +28,15 @@
 		hidden?: boolean;
 		onDecide: (decision: 'approve' | 'reject', targets: string[], reason: string) => void;
 		onSetHidden?: (hidden: boolean) => void;
+		/**
+		 * Optional: when set, the bubble offers a ↗ forward action
+		 * in its hover-toolbar that opens an inline target picker.
+		 * Confirming calls this with the chosen agent ids (must be
+		 * channel members; the server filters defensively too).
+		 * Issue #52. System messages do not get this affordance even
+		 * if `onForward` is provided.
+		 */
+		onForward?: (targetAgentIds: string[]) => void;
 	};
 
 	let {
@@ -43,8 +52,53 @@
 		excludeAgentIds = [],
 		hidden = false,
 		onDecide,
-		onSetHidden
+		onSetHidden,
+		onForward
 	}: Props = $props();
+
+	/* Forward-picker local state. The picker collapses back to
+	 * the toolbar button when cancelled or after a successful
+	 * forward; we don't need to persist anything across remounts. */
+	let showForwardPicker = $state(false);
+	let forwardTargets = $state<Set<string>>(new Set());
+
+	function toggleForwardTarget(id: string) {
+		const next = new Set(forwardTargets);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		forwardTargets = next;
+	}
+
+	function openForward() {
+		forwardTargets = new Set();
+		showForwardPicker = true;
+	}
+
+	function confirmForward() {
+		if (!onForward || forwardTargets.size === 0) return;
+		onForward([...forwardTargets]);
+		showForwardPicker = false;
+		forwardTargets = new Set();
+	}
+
+	function cancelForward() {
+		showForwardPicker = false;
+		forwardTargets = new Set();
+	}
+
+	/* Forward is only offered for settled non-system messages and
+	 * only when the parent provided the callback. Streaming bubbles
+	 * are skipped because the row is not yet in the DB — the
+	 * server's forward handler reads the body from there — and
+	 * because the user almost certainly wants to forward the *full*
+	 * reply, not a half-streamed fragment.
+	 *
+	 * Forward targets are the channel members, with no exclude
+	 * filter — the user can even forward back to the original
+	 * author if they really want to (rare, but no reason to block). */
+	const forwardable = $derived(
+		sender !== 'system' && !streaming && typeof onForward === 'function'
+	);
 
 	/**
 	 * Target selection for the approval picker, with a derived-with-
@@ -173,15 +227,28 @@
 		class:errored={!!error}
 		class:hidden-msg={hidden}
 	>
-		{#if onSetHidden}
-			<button
-				class="hide-btn"
-				title={hidden ? 'unhide message' : 'hide message from this view'}
-				onclick={() => onSetHidden(!hidden)}
-			>
-				{hidden ? '↻' : '×'}
-			</button>
-		{/if}
+		<div class="toolbar">
+			{#if forwardable}
+				<button
+					class="toolbar-btn"
+					title="forward this message to another agent"
+					onclick={openForward}
+					aria-label="forward"
+				>
+					↗
+				</button>
+			{/if}
+			{#if onSetHidden}
+				<button
+					class="toolbar-btn"
+					title={hidden ? 'unhide message' : 'hide message from this view'}
+					onclick={() => onSetHidden(!hidden)}
+					aria-label={hidden ? 'unhide' : 'hide'}
+				>
+					{hidden ? '↻' : '×'}
+				</button>
+			{/if}
+		</div>
 		{#if sender !== 'system'}
 			<div class="header">
 				<div class="header-main">
@@ -238,6 +305,44 @@
 					tokens: {tokens.total}
 					<span class="tokens-detail">(<span class="tok-arrow" aria-label="input">↓</span>{tokens.input}, <span class="tok-arrow" aria-label="output">↑</span>{tokens.output})</span>
 				</span>
+			</div>
+		{/if}
+
+		{#if showForwardPicker}
+			<!--
+				Inline forward picker. Visually mirrors the approval
+				picker below — same checkbox-chip layout — but the
+				action is single-step (no human-in-the-loop on the
+				relay; the user's confirm click *is* the approval per
+				issue #52 / ADR-0005 reasoning).
+			-->
+			<div class="approval forward-picker">
+				<div class="targets">
+					<span class="lbl">forward to:</span>
+					{#each members as m (m.id)}
+						<label class="target">
+							<input
+								type="checkbox"
+								checked={forwardTargets.has(m.id)}
+								onchange={() => toggleForwardTarget(m.id)}
+							/>
+							{m.name}
+						</label>
+					{/each}
+					{#if members.length === 0}
+						<span class="empty">no agents in this channel</span>
+					{/if}
+				</div>
+				<div class="actions">
+					<button
+						class="approve"
+						onclick={confirmForward}
+						disabled={forwardTargets.size === 0}
+					>
+						forward → {forwardTargets.size} target{forwardTargets.size === 1 ? '' : 's'}
+					</button>
+					<button onclick={cancelForward}>cancel</button>
+				</div>
 			</div>
 		{/if}
 
@@ -310,29 +415,37 @@
 		border-left-color: #475569;
 		border-left-style: dashed;
 	}
-	.hide-btn {
+	.toolbar {
 		position: absolute;
-		top: 0.25rem;
-		right: 0.35rem;
+		top: 0.2rem;
+		right: 0.3rem;
+		display: flex;
+		gap: 0.1rem;
+		opacity: 0;
+		transition: opacity 120ms;
+	}
+	.bubble:hover .toolbar,
+	.bubble.hidden-msg .toolbar {
+		opacity: 1;
+	}
+	.toolbar-btn {
 		background: transparent;
 		border: 0;
 		color: #475569;
-		font-size: 0.95rem;
+		font-size: 0.9rem;
 		line-height: 1;
 		cursor: pointer;
 		padding: 0.1rem 0.35rem;
 		border-radius: 3px;
-		opacity: 0;
-		transition: opacity 120ms;
 	}
-	.bubble:hover .hide-btn,
-	.bubble.hidden-msg .hide-btn {
-		opacity: 1;
-	}
-	.hide-btn:hover {
+	.toolbar-btn:hover {
 		color: #cbd5e1;
 		background: rgba(255, 255, 255, 0.05);
 	}
+
+	/* The forward picker reuses .approval's layout entirely; no
+	 * extra styling needed here — .forward-picker is just a hook
+	 * for any future visual differentiation. */
 	.bubble.user {
 		background: #1e3a5f;
 		border-top-right-radius: 2px;

@@ -18,6 +18,7 @@
  * Wire protocol:
  *   inbound  user_message     { channel_id, body }
  *   inbound  approval_decide  { approval_id, decision, targets?, reject_reason? }
+ *   inbound  forward_message  { message_id, target_agent_ids[] }
  *   inbound  ping             {}
  *   outbound message          { channel_id, sender, sender_id, body, ts, id }
  *   outbound message_start    { id, channel_id, sender_id, ts }
@@ -81,6 +82,11 @@ export type FinnInbound =
 			decision: 'approve' | 'reject';
 			targets?: string[];
 			reject_reason?: string;
+	  }
+	| {
+			type: 'forward_message';
+			message_id: string;
+			target_agent_ids: string[];
 	  }
 	| { type: 'ping' };
 
@@ -230,6 +236,10 @@ export interface FinnHooks {
 		},
 		emit: Emit
 	) => Promise<void> | void;
+	onForwardMessage?: (
+		msg: { message_id: string; target_agent_ids: string[] },
+		emit: Emit
+	) => Promise<void> | void;
 }
 
 /**
@@ -312,6 +322,25 @@ export function attachWebSocketServer(httpServer: UpgradableHttpServer, hooks: F
 					);
 				} catch (err) {
 					emit({ type: 'system', body: `approval error: ${(err as Error).message}` });
+				}
+				return;
+			}
+
+			if (parsed.type === 'forward_message') {
+				if (!hooks.onForwardMessage) {
+					send(ws, { type: 'system', body: 'no forward-message handler configured' });
+					return;
+				}
+				try {
+					await hooks.onForwardMessage(
+						{
+							message_id: parsed.message_id,
+							target_agent_ids: parsed.target_agent_ids
+						},
+						emit
+					);
+				} catch (err) {
+					emit({ type: 'system', body: `forward error: ${(err as Error).message}` });
 				}
 				return;
 			}
