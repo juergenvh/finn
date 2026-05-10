@@ -43,6 +43,7 @@
 	let openclawBaseUrl = $state('http://127.0.0.1:18789/v1');
 	let openclawTokenEnvVar = $state('FINN_OPENCLAW_API_KEY');
 	let openclawModel = $state('openclaw');
+	let openclawSessionOverride = $state('');
 	let oaiCompatBaseUrl = $state('https://agent.example.com/v1');
 	let oaiCompatTokenEnvVar = $state('FINN_OPENAI_COMPAT_API_KEY');
 	let oaiCompatModelHint = $state('default');
@@ -69,6 +70,7 @@
 			openclawTokenEnvVar =
 				(initialConfig.token_env_var as string | undefined) ?? 'FINN_OPENCLAW_API_KEY';
 			openclawModel = (initialConfig.model as string | undefined) ?? 'openclaw';
+			openclawSessionOverride = (initialConfig.session_override as string | undefined) ?? '';
 		} else if (agent?.connectorType === 'openai-compatible') {
 			oaiCompatBaseUrl =
 				(initialConfig.base_url as string | undefined) ?? 'https://agent.example.com/v1';
@@ -83,16 +85,46 @@
 		initializedFor = key;
 	});
 
-	const canSubmit = $derived(name.trim().length > 0 && !submitting);
+	// Validation: session_override is only meaningful for an explicit
+	// agent (`openclaw/<agentId>`). Combining it with the bare
+	// `openclaw` / `openclaw/default` is rejected by the connector at
+	// call time (see ADR-0017); we surface that as an inline error
+	// before submit so the user doesn't have to round-trip through a
+	// 400 from the server.
+	const sessionOverrideError = $derived.by<string | null>(() => {
+		if (connectorType !== 'openclaw') return null;
+		const trimmed = openclawSessionOverride.trim();
+		if (trimmed.length === 0) return null;
+		if (trimmed.length > 64) {
+			return 'Session override must be at most 64 characters.';
+		}
+		if (!/^[a-z0-9][a-z0-9_-]*$/i.test(trimmed)) {
+			return 'Session override must use only alphanumerics, dash, and underscore, starting with an alphanumeric.';
+		}
+		const modelTrimmed = openclawModel.trim().toLowerCase();
+		if (modelTrimmed === '' || modelTrimmed === 'openclaw' || modelTrimmed === 'openclaw/default') {
+			return 'Session override requires a specific agent in the Model field (e.g. "openclaw/dixie"), not the default.';
+		}
+		return null;
+	});
+
+	const canSubmit = $derived(
+		name.trim().length > 0 && !submitting && sessionOverrideError === null
+	);
 
 	function buildConfig(): Record<string, unknown> {
 		if (connectorType === 'openclaw') {
-			return {
+			const config: Record<string, unknown> = {
 				connector_type: 'openclaw',
 				base_url: openclawBaseUrl.trim(),
 				token_env_var: openclawTokenEnvVar.trim(),
 				model: openclawModel.trim()
 			};
+			const override = openclawSessionOverride.trim();
+			if (override.length > 0) {
+				config.session_override = override;
+			}
+			return config;
 		}
 		if (connectorType === 'openai-compatible') {
 			return {
@@ -178,6 +210,27 @@
 					OpenClaw agent target. <code>openclaw</code> = default agent;
 					<code>openclaw/&lt;agentId&gt;</code> for a specific one.
 				</span>
+			</label>
+			<label>
+				<span class="lbl">Session override (optional)</span>
+				<input
+					bind:value={openclawSessionOverride}
+					placeholder=""
+					maxlength="64"
+					aria-invalid={sessionOverrideError !== null}
+				/>
+				<span class="hint">
+					Optional. Pins this agent to a named upstream session
+					(e.g. <code>finn</code>, <code>sagesmith</code>), shared across
+					all finn channels using this agent and compatible with a
+					non-finn OpenClaw client using the same session name. Leave
+					empty for the default per-channel session. Requires a specific
+					agent in <strong>Model</strong> (e.g. <code>openclaw/dixie</code>),
+					not the default. See ADR-0017.
+				</span>
+				{#if sessionOverrideError}
+					<span class="field-error">{sessionOverrideError}</span>
+				{/if}
 			</label>
 		</fieldset>
 	{:else if connectorType === 'openai-compatible'}
@@ -274,6 +327,14 @@
 		background: #0e0e10;
 		padding: 0.05rem 0.3rem;
 		border-radius: 3px;
+	}
+	.field-error {
+		font-size: 0.75rem;
+		color: #fca5a5;
+		line-height: 1.3;
+	}
+	input[aria-invalid='true'] {
+		border-color: #b91c1c;
 	}
 	input, select, textarea {
 		background: #0e0e10;
