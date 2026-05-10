@@ -31,7 +31,9 @@ docs/
     ├── 0013-streaming-and-sequencing.md
     ├── 0014-user-triggered-forwarding.md
     ├── 0015-auto-approve-channels.md
-    └── 0016-rich-rendering.md
+    ├── 0016-rich-rendering.md
+    ├── 0017-agent-bound-session-override.md
+    └── 0018-agent-name-in-bubble-header.md
 ```
 
 ## Decisions (ADRs)
@@ -70,6 +72,8 @@ across the project (not per-area).
 | 0014 | User-triggered forwarding                              | second legitimate routing form alongside `@-mention` approvals: ↗ on a bubble forwards verbatim to channel members, lands directly in `routed` status, no `pending` stage. ADR-0005's no-auto-approve invariant unchanged. |
 | 0015 | Auto-approve channels: topology, audit, loop defences  | per-channel opt-in to skip the approval gate. finn surfaces facts (channel-member audit modal, mechanical duplicate flags, role labels from optional capability probes) and lets the user decide. Loop defences (roundtrip cap, NO_REPLY first-class, concurrent-stream ceiling) built in. |
 | 0016 | Rich rendering for message bubbles                     | markdown bodies (`marked` + `DOMPurify`, GFM + soft breaks), uniform for user and agent bubbles, no syntax highlighter in phase 1, mention post-process, ResizeObserver scroll discipline, always-on footer. Issue #1. |
+| 0017 | Agent-bound session override                           | optional `session_override` field on the OpenClaw connector config. Pins an agent to a named upstream session (e.g. `finn`, `sagesmith`) regardless of which finn channel it's used in. Multi-session = multi-agent-row, by design. **Proposed.** |
+| 0018 | Agent name in message-bubble header                    | bubble header shows agent name + optional session badge (only when ADR-0017 override is set) + disclosure caret for connector / session-key debugging info. Default behaviour unchanged for agents without override. **Proposed.** |
 
 ## Setup guides
 
