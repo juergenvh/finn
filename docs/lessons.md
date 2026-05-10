@@ -378,3 +378,84 @@ away from the import that caused the shadow).
 
 A `find node_modules/<pkg> -name '*.d.ts'` is cheap; it would
 have surfaced the bundled types in two seconds.
+
+## 10. Symmetric endpoints, asymmetric changes — 2026-05-10
+
+When PR #67 added two UI-derived fields (`model` + `sessionOverride`) to
+agent JSON shipped to the client, it updated `/api/agents` but not the
+parallel `/api/channels/[id]/members` endpoint. Both endpoints return
+the same `AgentInfo` type. The bubble component looked the agent up in
+`members`, which is sourced from the channel-members endpoint, not from
+the agents endpoint. So the derived fields were always `undefined` for
+every agent — the ADR-0018 session badge never rendered, and the
+disclosure panel showed `Model: (default)` and `Session override: —` for
+every agent including those with a real override configured.
+
+**Symptom:** User test of #67 right after merge: "scheint sich nichts
+geändert zu haben" for a `dixie-sagesmith` agent with a real override.
+Disclosure showed default-shaped fields.
+
+**Root cause:** Two endpoints share an output type (`AgentInfo`) but
+were extended asymmetrically. Type-checking didn't catch it because
+`model?` and `sessionOverride?` are *optional* on `AgentInfo` — the
+old four-field response still satisfies the type.
+
+**Fix:** #68 mirrored the same derive-from-config logic into the
+channel-members endpoint. Both endpoints now share the same shape.
+
+**Meta — the lesson behind the lesson.** When a UI type is served by
+more than one endpoint, optional fields on that type are a footgun:
+the compiler treats "this endpoint omits the field" as
+indistinguishable from "the value is genuinely absent". For the next
+time:
+
+- **List the endpoints that produce the type.** Before extending, find
+  all `select({...})` blocks that map to the same client type. Trace
+  the consumer side too — which calling code reads the new field?
+- **Prefer one helper function** for the shape derivation when two
+  endpoints share output. The fix in #68 was literally copy-paste of
+  the #67 derive block. A `deriveAgentUiBits(connectorType, configJson)`
+  helper in `db/agent-config.ts` would have made the symmetry obvious
+  and the omission visible.
+- **External verification applies to data flows.** I asserted "members
+  comes from the same source" without checking. One grep for `members =`
+  in `+page.svelte` would have shown the truth in two seconds. Identifier
+  discipline is verbatim-or-nothing; data-flow discipline is
+  trace-or-nothing.
+
+## 11. PR state not verified before push — 2026-05-10
+
+After Jürgen reported the #67 bug, I pushed the fix as an extra commit
+on the same `feat/0018-bubble-header` branch, assuming PR #67 was
+still open. It had already been merged. The push went through (the
+remote accepted the orphan commit), but the fix wasn't visible
+anywhere — not on main, not in any open PR. Jürgen asked "wo ist der
+PR für den Fix?" and I had to backtrack: cherry-pick the commit to a
+fresh branch off the fresh main, push, open #68.
+
+**Symptom:** Fix committed and pushed; nothing visible on GitHub
+because the target PR was already merged.
+
+**Root cause:** I assumed branch state from session memory ("we
+merged #65 and #66, #67 was just opened") without calling
+`gh pr view 67` to verify. By that point, #67 had been merged too —
+Jürgen had said "merge ist durch, mach erstmal weiter" earlier and I
+had heard it as a forward-looking instruction, not a state report.
+
+**Fix:** Cherry-pick → fresh branch off updated main → PR #68. Took
+30 seconds once I actually looked.
+
+**Meta.** This is the second variant of #10 in one evening: assuming
+state instead of querying it. The fix is the same: when a PR is the
+target of any new work, `gh pr view <n> --json state` is the cheapest
+possible check, and not doing it produced a real misroute. Adding to
+my mental routine: *before pushing a fix on a feature branch, verify
+the feature PR is still open.* If the answer is "merged", the fix
+needs its own branch off main, not a push onto the dead feature
+branch.
+
+Also worth noting: this kind of mistake clusters at the end of a long
+session. Three vermutung-instead-of-verifizieren misses in 20
+minutes around 22:00 on a Sunday is a signal, not just a fact. The
+honest move at that point is to slow down or stop, not to keep
+pushing.

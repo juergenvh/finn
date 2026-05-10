@@ -1,7 +1,8 @@
 # ADR 0018 — Agent name in message-bubble header
 
-- **Status:** proposed
+- **Status:** accepted (shipped 2026-05-10)
 - **Date:** 2026-05-10
+- **Shipped via:** #67 (bubble header + disclosure panel), #68 (fix: same derive in channel-members endpoint)
 - **Deciders:** Jürgen, Dixie
 - **Related:** ADR-0016 (rich rendering), ADR-0017 (agent-bound
   session override), `src/lib/components/MessageBubble.svelte`
@@ -152,12 +153,37 @@ above the timestamp.
 - **Backing agent:** `openclaw/<agentId>` (or "default" if no
   explicit agent id in `model`).
 - **Connector:** `openclaw`, `openai-compatible`, `anthropic-stub`.
-- **Session-key sent:** the literal string the connector sent on
-  the last turn (truncated to 64 chars). Useful for debugging
-  routing issues without leaving the UI.
+- **Session-key (preview):** a client-side reconstruction of the
+  session-key the connector would emit *now*, computed from the
+  agent's current config. NOT the literal historical key sent on
+  this particular turn. See "As-built" note below for the
+  scope-shrink.
 
 The disclosure panel reuses the rich-rendering substrate from
 ADR-0016 (no new render path). It is read-only.
+
+### As-built note (2026-05-10): preview, not literal
+
+The original wording above called for the **literal** session-key
+sent on the last turn. Surfacing that faithfully requires
+per-message persistence (new column on `messages`, or extension
+of an existing metadata blob) plus write-path plumbing in the
+streaming dispatcher. That schema + plumbing work was judged
+out of scope for the ADR-0017+0018 stack — it would have added a
+migration to a stack that was otherwise self-contained.
+
+**What shipped instead** is a client-side reconstruction labelled
+`Session key (preview)` in the panel. It matches what the
+connector *would* send now given the agent's current config; it
+cannot detect a configuration drift between the historical turn
+and the present.
+
+**Followup, not blocking.** A separate change (its own issue +
+likely small ADR) can add the literal-key persistence later, at
+which point the panel label drops back to plain `Session key`.
+The ADR-0018 contract — *"the user can see the routing info
+without leaving the UI"* — is met by the preview; the literal
+variant is a precision upgrade, not a UX gap.
 
 ## Migration
 

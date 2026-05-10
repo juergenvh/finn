@@ -1,7 +1,8 @@
 # ADR 0017 — Agent-bound session override
 
-- **Status:** proposed
+- **Status:** accepted (shipped 2026-05-10)
 - **Date:** 2026-05-10
+- **Shipped via:** #65 (schema + connector + vitest), #66 (CRUD form + docs/connectors.md update)
 - **Deciders:** Jürgen, Dixie
 - **Related:** ADR-0002 (original session-key rationale),
   ADR-0012 (agent-aware session-key format),
