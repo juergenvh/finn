@@ -60,28 +60,61 @@ or openclaw/<agentId>`).
 The seed defaults to `model: openclaw` (default agent, default
 model) — see `scripts/seed.ts`.
 
-### Caveat: agent selection vs. session continuity
+### Session continuity: how finn pins OpenClaw sessions
 
-finn pins one OpenClaw-side session per channel via
-`x-openclaw-session-key: finn:<channel_id>` (ADR-0002). On the
-OpenClaw gateway, sessions are **agent-scoped** — once a given
-session-key has been seen with one agent, the agent is bound to
-that session and subsequent calls under the same session-key load
-the bound agent regardless of the `model` field's `openclaw/<agentId>`
-suffix. In practice: if a finn channel has ever talked to Dixie, then
-later retargeted to Gwen via `model: openclaw/gwen`, the channel
-will keep replying as Dixie until the session-key changes.
+finn pins one OpenClaw-side session per (agent, channel) pair
+via an `x-openclaw-session-key` header. The exact shape depends
+on whether the agent's `model` field names a specific agent and
+whether the optional `session_override` is set:
 
-The planned fix is an agent-aware session-key format
-(`finn:<agent>:<channel_id>`), so each `(agent, channel)` pair gets
-its own OpenClaw session. Tracked as a follow-up to this guide;
-until it lands:
+| Agent's `model`             | `session_override` | Session-key sent                          | ADR     |
+| --------------------------- | ------------------ | ----------------------------------------- | ------- |
+| `openclaw`                  | (empty)            | `finn:<channel_id>`                       | 0002    |
+| `openclaw/default`          | (empty)            | `finn:<channel_id>`                       | 0002    |
+| `openclaw/<agentId>`        | (empty)            | `agent:<agentId>:finn:<channel_id>`       | 0012    |
+| `openclaw/<agentId>`        | `<name>`           | `agent:<agentId>:<name>` (flat)           | 0017    |
 
-- New finn channels with `model: openclaw/<agentId>` route correctly
-  on first contact.
-- Existing finn channels that have already talked to a different
-  agent are stuck with the old agent until the session-key format
-  changes (single-user pre-public; we delete and recreate).
+**Default-agent + override is unsupported**: finn does not know
+the gateway's currently-configured default-agent name (and
+deliberately so — see ADR-0012's *"Why two shapes, not one"*),
+so it cannot construct a stable session-key for that combination.
+The agent CRUD form rejects this combination inline; the connector
+rejects it at call time with an error referencing ADR-0017.
+
+#### When to use `session_override`
+
+Use the override when you want **the same upstream agent to
+maintain one conversation across all finn channels using it**,
+or when you want the upstream session to be **shareable with a
+non-finn OpenClaw client** (the TUI, a webchat, another tool) by
+using the same session name on both sides.
+
+Use the default (no override) when you want **per-channel
+isolation**, i.e. each finn channel hosts its own conversation
+thread with this agent.
+
+#### Worked example: multiple session-variants of one upstream agent
+
+Want to address Dixie from finn under a `finn` session, while
+your OpenClaw TUI talks to the same Dixie under the default
+`main` session? Register two finn agents that point at the same
+upstream:
+
+| finn agent name | `model`            | `session_override` | Session-key sent          |
+| --------------- | ------------------ | ------------------ | ------------------------- |
+| `dixie`         | `openclaw/dixie`   | *(empty)*          | `agent:dixie:finn:c_X`    |
+| `dixie-finn`    | `openclaw/dixie`   | `finn`             | `agent:dixie:finn`        |
+
+The `dixie` agent gives you ADR-0012's per-channel isolation
+(each finn channel is its own conversation). The `dixie-finn`
+agent gives you a single shared upstream `finn` session that
+spans every finn channel `dixie-finn` is a member of — and that
+you can also reach from the OpenClaw TUI as session `finn`.
+
+This is the design called out in ADR-0017 as "session is a
+property of the agent, not the channel." Different sessions =
+different conversation partners (shared persona, distinct memory
+windows) modelled as distinct agent-registry rows.
 
 ---
 
