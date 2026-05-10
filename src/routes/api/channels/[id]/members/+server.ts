@@ -11,6 +11,7 @@ import { json, error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getDb } from '$lib/server/db/client';
 import { agents, channelMembers, channels } from '$lib/server/db/schema';
+import { parseAgentConfig } from '$lib/server/db/agent-config';
 import { recordSystemMessage } from '$lib/server/messages';
 import { broadcastStateChange, broadcastEvent } from '$lib/server/ws/attach';
 import type { RequestHandler } from './$types';
@@ -22,13 +23,35 @@ export const GET: RequestHandler = async ({ params }) => {
 			id: agents.id,
 			name: agents.name,
 			connectorType: agents.connectorType,
-			enabled: agents.enabled
+			enabled: agents.enabled,
+			configJson: agents.config
 		})
 		.from(channelMembers)
 		.innerJoin(agents, eq(channelMembers.agentId, agents.id))
 		.where(and(eq(channelMembers.channelId, params.id), isNull(agents.deletedAt)))
 		.all();
-	return json({ members: rows });
+
+	// Derive UI-relevant config bits the same way /api/agents does,
+	// so the bubble's session-badge + disclosure (ADR-0018) work
+	// regardless of which list endpoint sourced the AgentInfo.
+	// Same shape and same defensive parse-failure tolerance as
+	// /api/agents — see that handler for the rationale.
+	const members = rows.map((row) => {
+		let model: string | undefined;
+		let sessionOverride: string | undefined;
+		try {
+			const cfg = parseAgentConfig(row.connectorType, row.configJson);
+			if (cfg.connector_type === 'openclaw') {
+				model = cfg.model;
+				sessionOverride = cfg.session_override;
+			}
+		} catch {
+			/* row still listed without derived fields */
+		}
+		const { configJson: _drop, ...publicFields } = row;
+		return { ...publicFields, model, sessionOverride };
+	});
+	return json({ members });
 };
 
 const AddSchema = z.object({ agent_id: z.string().min(1) });
