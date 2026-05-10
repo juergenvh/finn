@@ -13,6 +13,7 @@ import { agents } from '$lib/server/db/schema';
 import { newId } from '$lib/server/db/ids';
 import {
 	ConnectorConfigSchema,
+	parseAgentConfig,
 	serializeAgentConfig,
 	type ConnectorConfig
 } from '$lib/server/db/agent-config';
@@ -28,12 +29,45 @@ export const GET: RequestHandler = async ({ url }) => {
 			name: agents.name,
 			connectorType: agents.connectorType,
 			enabled: agents.enabled,
-			deletedAt: agents.deletedAt
+			deletedAt: agents.deletedAt,
+			configJson: agents.config
 		})
 		.from(agents);
 
 	const rows = includeArchived ? baseQuery.all() : baseQuery.where(isNull(agents.deletedAt)).all();
-	return json({ agents: rows });
+
+	// Derive UI-relevant config bits from the JSON config (ADR-0018):
+	// - `model`: only meaningful for the openclaw connector today; used
+	//   by the bubble header to know whether the agent is pinned to a
+	//   specific upstream agent or runs against the gateway default.
+	// - `sessionOverride`: present when the openclaw connector pins a
+	//   named upstream session (ADR-0017); drives the bubble's session
+	//   badge.
+	//
+	// We deliberately do NOT ship the raw config object to the client:
+	// it carries internal field names (env-var names etc.) that the UI
+	// has no business knowing about. Two derived fields are enough.
+	const agentsWithUiBits = rows.map((row) => {
+		let model: string | undefined;
+		let sessionOverride: string | undefined;
+		try {
+			const cfg = parseAgentConfig(row.connectorType, row.configJson);
+			if (cfg.connector_type === 'openclaw') {
+				model = cfg.model;
+				sessionOverride = cfg.session_override;
+			}
+		} catch {
+			// A row whose JSON config no longer parses (e.g. after a
+			// schema tightening + un-migrated old data) is still listed
+			// with its name/id/enabled bits; the UI just won't have the
+			// derived fields. Surfacing the parse error here would
+			// break the whole list endpoint, which is too coarse.
+		}
+		const { configJson: _drop, ...publicFields } = row;
+		return { ...publicFields, model, sessionOverride };
+	});
+
+	return json({ agents: agentsWithUiBits });
 };
 
 /**

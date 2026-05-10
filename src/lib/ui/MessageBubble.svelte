@@ -6,6 +6,14 @@
 	type Props = {
 		sender: 'user' | 'agent' | 'system';
 		senderName: string;
+		/**
+		 * The sender's id. For agent senders this is the row id in the
+		 * `agents` table; it lets the bubble look up the speaking agent
+		 * in `members` to drive the ADR-0018 session badge + disclosure
+		 * panel without the parent having to pre-compute that info.
+		 * NULL for user / system messages.
+		 */
+		senderId?: string | null;
 		body: string;
 		ts: number;
 		/** True while the agent reply is mid-stream (between
@@ -44,6 +52,7 @@
 	let {
 		sender,
 		senderName,
+		senderId = null,
 		body,
 		ts,
 		streaming = false,
@@ -117,6 +126,62 @@
 	const forwardable = $derived(
 		sender !== 'system' && !streaming && typeof onForward === 'function'
 	);
+
+	/* Session badge + disclosure panel (ADR-0018).
+	 *
+	 * Looks up the speaking agent in `members` (same lookup pattern
+	 * as nameOf() further below) and derives three things:
+	 *
+	 *   - speakingAgent: the AgentInfo row, or null for user / system
+	 *     senders, unknown agent ids, or non-agent bubbles.
+	 *   - sessionBadge: the override name to render as a header badge,
+	 *     or null when the agent has no override set (channel-default
+	 *     session, no badge per ADR-0018 §"Channel-default session:
+	 *     badge or no badge").
+	 *   - sessionKeyPreview: a clientside reconstruction of the
+	 *     session-key the connector would emit *now* (matching the
+	 *     three shapes from ADR-0017 PR 1's `sessionKeyFor`). NOT
+	 *     the historical literal key sent on this particular turn —
+	 *     that would require per-message persistence which is
+	 *     deliberately out of scope here. The disclosure panel
+	 *     labels this as a preview to avoid implying historical
+	 *     truth.
+	 */
+	const speakingAgent = $derived<AgentInfo | null>(
+		sender === 'agent' && senderId ? (members.find((m) => m.id === senderId) ?? null) : null
+	);
+	const sessionBadge = $derived<string | null>(
+		speakingAgent?.connectorType === 'openclaw' && speakingAgent.sessionOverride
+			? speakingAgent.sessionOverride
+			: null
+	);
+	const sessionKeyPreview = $derived.by<string | null>(() => {
+		if (!speakingAgent || speakingAgent.connectorType !== 'openclaw') return null;
+		const model = speakingAgent.model?.trim() ?? '';
+		const override = speakingAgent.sessionOverride?.trim() ?? '';
+		// Same agent-id extraction shape the server uses in
+		// explicitAgentIdFromModel(); kept conservative since this
+		// preview is informational, not authoritative.
+		let explicitAgentId: string | null = null;
+		const m = model.match(/^openclaw[:/](?<id>[a-z0-9][a-z0-9_-]{0,63})$/i);
+		if (m?.groups?.id && m.groups.id.toLowerCase() !== 'default') {
+			explicitAgentId = m.groups.id;
+		}
+		if (override.length > 0 && explicitAgentId) {
+			return `agent:${explicitAgentId}:${override}`;
+		}
+		if (explicitAgentId) {
+			return `agent:${explicitAgentId}:finn:<channel-id>`;
+		}
+		return 'finn:<channel-id>';
+	});
+
+	/* Disclosure-panel toggle (ADR-0018). One bit of UI state per
+	 * bubble; collapsed by default. Clicking the caret toggles. */
+	let showDisclosure = $state(false);
+	function toggleDisclosure() {
+		showDisclosure = !showDisclosure;
+	}
 
 	/* Markdown rendering (ADR-0016).
 	 *
@@ -304,6 +369,22 @@
 			<div class="header">
 				<div class="header-main">
 					<span class="who">{senderName}</span>
+					{#if sessionBadge}
+						<span
+							class="session-badge"
+							title="Pinned to upstream session ‘{sessionBadge}’ (ADR-0017)"
+						>· {sessionBadge}</span>
+					{/if}
+					{#if speakingAgent}
+						<button
+							type="button"
+							class="disclosure-caret"
+							aria-expanded={showDisclosure}
+							aria-label={showDisclosure ? 'Hide agent details' : 'Show agent details'}
+							title={showDisclosure ? 'Hide agent details' : 'Show agent details'}
+							onclick={toggleDisclosure}
+						>{showDisclosure ? '▴' : '▾'}</button>
+					{/if}
 					<span class="ts">{fmtTs(ts)}</span>
 					{#if streamingState}
 						<span
@@ -316,9 +397,31 @@
 						<span class="badge {statusBadge}">{statusBadge}</span>
 					{/if}
 				</div>
+				{#if showDisclosure && speakingAgent}
+					<!--
+						ADR-0018 disclosure panel. Read-only, surfaces the
+						routing info the user would otherwise need devtools
+						to see. Reuses no markdown pipeline (plain text).
+					-->
+					<div class="disclosure-panel" role="region" aria-label="agent details">
+						<dl>
+							<dt>Connector</dt>
+							<dd>{speakingAgent.connectorType}</dd>
+							{#if speakingAgent.connectorType === 'openclaw'}
+								<dt>Model</dt>
+								<dd>{speakingAgent.model ?? '(default)'}</dd>
+								<dt>Session override</dt>
+								<dd>{speakingAgent.sessionOverride ?? '—'}</dd>
+								<dt>Session key (preview)</dt>
+								<dd><code>{sessionKeyPreview}</code></dd>
+							{/if}
+						</dl>
+					</div>
+				{/if}
 				<!-- routing/meta sub-line: appears only when data is present.
 				     for now this only renders for terminal approvals; future
-				     additions (origin agent, relay path, etc.) plug in here. -->
+				     additions (origin agent, relay path, etc.) plug in here.
+				     ADR-0018's disclosure panel renders above this block. -->
 				{#if approval && approval.status === 'routed' && approval.targets.length > 0}
 					<div class="header-meta">
 						routed to {approval.targets.map(nameOf).join(', ')}
@@ -634,6 +737,69 @@
 		color: #e2e8f0;
 		font-weight: 600;
 		text-transform: lowercase;
+	}
+	.session-badge {
+		/* ADR-0018 session badge. Sits inline after the agent name,
+		 * before the disclosure caret. Visually subordinate: same
+		 * size as the timestamp, muted-but-readable colour. The
+		 * leading mid-dot is part of the badge text so the dot's
+		 * spacing is governed by gap, not a separator element. */
+		color: #94a3b8;
+		font-size: 0.78rem;
+		letter-spacing: 0.01em;
+	}
+	.disclosure-caret {
+		/* Plain text-like button. No border, no background; matches
+		 * the in-bubble visual weight of the timestamp. Cursor +
+		 * focus-ring on keyboard. */
+		background: transparent;
+		border: none;
+		padding: 0 0.15rem;
+		color: #64748b;
+		font-size: 0.78rem;
+		line-height: 1;
+		cursor: pointer;
+		font-family: inherit;
+	}
+	.disclosure-caret:hover {
+		color: #cbd5e1;
+	}
+	.disclosure-caret:focus-visible {
+		outline: 1px solid #38bdf8;
+		outline-offset: 1px;
+		border-radius: 2px;
+	}
+	.disclosure-panel {
+		margin-top: 0.4rem;
+		padding: 0.4rem 0.55rem;
+		background: rgba(0, 0, 0, 0.18);
+		border-radius: 4px;
+		font-size: 0.72rem;
+		line-height: 1.4;
+		color: #94a3b8;
+	}
+	.disclosure-panel dl {
+		margin: 0;
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		gap: 0.15rem 0.6rem;
+	}
+	.disclosure-panel dt {
+		color: #64748b;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		font-size: 0.65rem;
+	}
+	.disclosure-panel dd {
+		margin: 0;
+		color: #cbd5e1;
+		word-break: break-all;
+	}
+	.disclosure-panel code {
+		background: #0e0e10;
+		padding: 0.05rem 0.3rem;
+		border-radius: 3px;
+		font-size: 0.7rem;
 	}
 	.ts {
 		color: #64748b;
