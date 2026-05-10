@@ -10,13 +10,17 @@
  *   mode harmlessly ignore it (transitional posture).
  *
  * Session continuity:
- *   See docs/decisions/0002-session-key-format.md (original) and
- *   docs/decisions/0012-agent-aware-session-key.md (current).
+ *   See docs/decisions/0002-session-key-format.md (original),
+ *   docs/decisions/0012-agent-aware-session-key.md (ADR-0012,
+ *   agent-scoped channel-bound shape), and
+ *   docs/decisions/0017-agent-bound-session-override.md (ADR-0017,
+ *   optional flat-session override).
  *
- *   The session-key shape depends on whether the connector's
- *   `model` field names a specific agent:
+ *   The session-key shape depends on (a) whether the connector's
+ *   `model` field names a specific agent, and (b) whether the
+ *   agent's config sets `session_override`:
  *
- *     - `model: "openclaw"` (or `"openclaw/default"`)
+ *     - `model: "openclaw"` (or `"openclaw/default"`), no override
  *       → send `finn:<channel_id>` (ADR-0002's original shape).
  *         The gateway wraps it as `agent:<resolved-default>:finn:<channel_id>`
  *         using whatever default-agent id is currently configured.
@@ -24,18 +28,29 @@
  *         default-agent id and matches the gateway's stateful
  *         session store.
  *
- *     - `model: "openclaw/<agentId>"`
- *       → send `agent:<agentId>:finn:<channel_id>`. The explicit
- *         `agent:<agentId>:` prefix is what the gateway's session-
- *         key parser (`parseAgentSessionKey()` upstream) recognises
- *         and uses to scope the session to that agent. Without it,
- *         the gateway resolves the agent before the session lookup
- *         and the multi-agent case breaks: an existing
- *         `agent:<otherAgent>:finn:<channel_id>` session captures
- *         the call regardless of the `model` field.
+ *     - `model: "openclaw/<agentId>"`, no override
+ *       → send `agent:<agentId>:finn:<channel_id>` (ADR-0012). The
+ *         explicit `agent:<agentId>:` prefix is what the gateway's
+ *         session-key parser (`parseAgentSessionKey()` upstream)
+ *         recognises and uses to scope the session to that agent.
+ *         Without it, the gateway resolves the agent before the
+ *         session lookup and the multi-agent case breaks: an
+ *         existing `agent:<otherAgent>:finn:<channel_id>` session
+ *         captures the call regardless of the `model` field.
  *
- *   In both cases, each (agent, finn channel) pair maps to one
- *   stable OpenClaw-side session.
+ *     - `model: "openclaw/<agentId>"` + `session_override: "<name>"`
+ *       → send `agent:<agentId>:<name>` (ADR-0017). The channel-id
+ *         component drops out: the override pins this agent to a
+ *         named upstream session shared across all finn channels
+ *         using this agent (and shareable with non-finn OpenClaw
+ *         clients on the same name).
+ *
+ *     - default-agent + override is REJECTED at call time. ADR-0017
+ *         keeps finn opaque to the gateway's default-agent name (a
+ *         continuity property inherited from ADR-0012); combining
+ *         override + default-agent would require finn to know that
+ *         name. The connector throws a descriptive error; the form
+ *         layer (planned PR 2) catches this before save.
  *
  * Configuration:
  *   The connector receives an OpenclawConfig object (see
@@ -110,22 +125,64 @@ function explicitAgentIdFromModel(model: string): string | null {
 /**
  * Build the session-key string sent to OpenClaw.
  *
- * Two shapes, depending on whether the `model` field names a specific
- * agent (see file-level docblock for the rationale):
+ * Three shapes (see file-level docblock for the rationale):
  *
- *   - explicit agent: `agent:<agentId>:finn:<channel_id>` — the
- *     `agent:<agentId>:` prefix is what the gateway's session-key
- *     parser recognises and uses to scope the session.
- *   - default agent: `finn:<channel_id>` — ADR-0002's original
- *     shape; the gateway wraps it with the resolved default-agent
- *     id at session-store time.
+ *   - default agent, no override: `finn:<channel_id>` (ADR-0002).
+ *     The gateway wraps it with the resolved default-agent id at
+ *     session-store time.
+ *   - explicit agent, no override: `agent:<agentId>:finn:<channel_id>`
+ *     (ADR-0012). The `agent:<agentId>:` prefix is what the
+ *     gateway's session-key parser recognises and uses to scope
+ *     the session.
+ *   - explicit agent + override: `agent:<agentId>:<override>`
+ *     (ADR-0017). The channel-id component drops out so this agent
+ *     maintains one named conversation across all finn channels
+ *     using it.
+ *
+ * Default-agent + override is intentionally unsupported and throws.
+ * See file-level docblock and ADR-0017.
+ *
+ * An empty-string override is treated as absent (defensive: the
+ * Zod schema rejects `""` at config-load time via `min(1)`, but
+ * we don't want runtime code to depend on that being the only
+ * caller path).
  */
-function sessionKeyFor(explicitAgentId: string | null, channelId: string): string {
+function sessionKeyFor(
+	explicitAgentId: string | null,
+	channelId: string,
+	sessionOverride?: string
+): string {
+	const hasOverride = typeof sessionOverride === 'string' && sessionOverride.length > 0;
+	if (hasOverride) {
+		if (!explicitAgentId) {
+			throw new Error(
+				'session_override requires an explicit agent in `model` (e.g. "openclaw/dixie"); ' +
+					'using "openclaw" / "openclaw/default" with an override is not supported. ' +
+					'See ADR-0017.'
+			);
+		}
+		return `agent:${explicitAgentId}:${sessionOverride}`;
+	}
 	if (explicitAgentId) {
 		return `agent:${explicitAgentId}:${FINN_SESSION_PREFIX}:${channelId}`;
 	}
 	return `${FINN_SESSION_PREFIX}:${channelId}`;
 }
+
+/**
+ * Test-only exports. These let `tests/unit/openclaw-session-key.test.ts`
+ * exercise the pure helpers directly without going through a
+ * mocked-fetch streaming call. They are NOT part of finn's runtime
+ * public surface; callers should go through `streamReply()`.
+ *
+ * Underscore-prefixed names + `__test__` prefix to make grep'ability
+ * obvious and discourage accidental imports from production code.
+ *
+ * @internal
+ */
+export const __test__sessionKeyFor = sessionKeyFor;
+/** @internal */
+export const __test__explicitAgentIdFromModel = explicitAgentIdFromModel;
 
 type ChatMessage = {
 	role: 'system' | 'user' | 'assistant';
@@ -174,6 +231,7 @@ async function* streamReply(
 	const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
 
 	const explicitAgentId = explicitAgentIdFromModel(model);
+	const sessionOverride = args.config.session_override;
 
 	const headers: Record<string, string> = {
 		'content-type': 'application/json',
@@ -181,8 +239,8 @@ async function* streamReply(
 		accept: 'text/event-stream',
 		// See ADR-0001. Always declare the scope.
 		'x-openclaw-scopes': FINN_SCOPES,
-		// See ADR-0002 + ADR-0012. Same session-key derivation as send().
-		'x-openclaw-session-key': sessionKeyFor(explicitAgentId, args.channelId)
+		// See ADR-0002 + ADR-0012 + ADR-0017.
+		'x-openclaw-session-key': sessionKeyFor(explicitAgentId, args.channelId, sessionOverride)
 	};
 	if (apiKey) {
 		headers.authorization = `Bearer ${apiKey}`;
