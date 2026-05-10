@@ -27,7 +27,23 @@ export const OpenclawConfigSchema = z.object({
 	token_env_var: z.string().min(1).default('FINN_OPENCLAW_API_KEY'),
 	/** OpenClaw model id (e.g. "openclaw" for the default agent, or
 	 * "openclaw/<agentId>"). */
-	model: z.string().min(1).default('openclaw')
+	model: z.string().min(1).default('openclaw'),
+	/** Optional. When set, the connector pins this agent to the named
+	 * upstream session (e.g. "finn", "sagesmith") regardless of which
+	 * finn channel it's used in. Drops the channel-id component from
+	 * the session-key. Use when you want the same upstream agent to
+	 * maintain one conversation across channels, OR to share an upstream
+	 * session with a non-finn OpenClaw client (TUI, webchat) by using
+	 * the same name on both sides. See ADR-0017. */
+	session_override: z
+		.string()
+		.min(1)
+		.max(64)
+		.regex(
+			/^[a-z0-9][a-z0-9_-]{0,63}$/i,
+			'session_override must be a session-key-safe identifier (alnum + dash + underscore, leading alnum, max 64 chars)'
+		)
+		.optional()
 });
 
 export type OpenclawConfig = z.infer<typeof OpenclawConfigSchema>;
