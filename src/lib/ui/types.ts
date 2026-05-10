@@ -11,6 +11,19 @@ export type AgentInfo = {
 	name: string;
 	connectorType: string;
 	enabled: boolean;
+	/**
+	 * The agent's `model` field, when available. Currently only set
+	 * for the `openclaw` connector (where it drives session-key
+	 * derivation, ADR-0012). Absent for other connectors and
+	 * for rows whose stored config did not parse.
+	 */
+	model?: string;
+	/**
+	 * The agent's optional `session_override` field, when set
+	 * (ADR-0017). Only meaningful for the `openclaw` connector.
+	 * When present, the bubble header renders a session badge.
+	 */
+	sessionOverride?: string;
 };
 
 export type DBMessage = {

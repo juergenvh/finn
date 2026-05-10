@@ -1135,6 +1135,7 @@
 				<MessageBubble
 					sender={m.sender}
 					senderName={nameOfSender(m)}
+					senderId={m.senderId}
 					body={m.body}
 					ts={m.ts}
 					streaming={m.streaming}
