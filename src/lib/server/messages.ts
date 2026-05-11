@@ -9,6 +9,7 @@ import { eq, asc, desc, and, lt, like, isNull } from 'drizzle-orm';
 import { getDb } from './db/client.ts';
 import { messages, type Message } from './db/schema.ts';
 import { newId } from './db/ids.ts';
+import { resetRoundtrips } from './loop-defence.ts';
 
 export type RecordUserMessage = {
 	channelId: string;
@@ -59,6 +60,9 @@ export function recordUserMessage(args: RecordUserMessage): Message {
 		tokensJson: null
 	};
 	db.insert(messages).values(row).run();
+	// User stepping into the conversation breaks any active
+	// agent-to-agent loop (ADR-0020).
+	resetRoundtrips(args.channelId);
 	return row;
 }
 

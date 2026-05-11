@@ -180,6 +180,10 @@ export const settingsGlobal = sqliteTable('settings_global', {
 	theme: text('theme', { enum: ['system', 'light', 'dark'] })
 		.notNull()
 		.default('system'),
+	/** Default agent-to-agent roundtrip cap per user-message window
+	 * (ADR-0020). Resets on every persisted user message in the
+	 * channel. Bounded [1..100] at the API layer. */
+	roundtripCapDefault: integer('roundtrip_cap_default').notNull().default(5),
 	updatedAt: integer('updated_at').notNull()
 });
 
@@ -204,6 +208,9 @@ export const settingsChannel = sqliteTable('settings_channel', {
 	 * (ADR-0015, issue #28). Default false; the UI surface that
 	 * flips it lands in the ADR-0015 PR stack on top of this column. */
 	autoApprove: integer('auto_approve', { mode: 'boolean' }).notNull().default(false),
+	/** Channel-specific override for the roundtrip cap (ADR-0020).
+	 * NULL → inherit `settings_global.roundtrip_cap_default`. */
+	roundtripCapOverride: integer('roundtrip_cap_override'),
 	updatedAt: integer('updated_at').notNull()
 });
 

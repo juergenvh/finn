@@ -22,13 +22,15 @@
 		hideSystemMessagesDefault: boolean;
 		defaultChannelId: string | null;
 		theme: Theme;
+		roundtripCapDefault: number;
 	};
 
 	type ChannelSettings = {
 		channelId: string;
 		kbBudgetOverride: number | null;
 		autoApprove: boolean;
-		effective: { kbBudget: number; autoApprove: boolean };
+		roundtripCapOverride: number | null;
+		effective: { kbBudget: number; autoApprove: boolean; roundtripCap: number };
 	};
 
 	type ChannelInfo = { id: string; name: string };
@@ -53,11 +55,17 @@
 	// because the WS broadcast reload would clobber unsaved edits. The
 	// buffers are seeded on load and on "discard"; Save flushes them.
 	let editGlobal = $state<Global | null>(null);
-	let editChannel = $state<{ kbBudgetOverride: number | null; autoApprove: boolean } | null>(null);
+	let editChannel = $state<{
+		kbBudgetOverride: number | null;
+		autoApprove: boolean;
+		roundtripCapOverride: number | null;
+	} | null>(null);
 	// Channel `kbBudgetOverride` UX: textbox bound to a string so the user
 	// can type and clear freely. Empty string = "inherit global" (null on
 	// the wire). Numeric out-of-range surfaces as validation on Save.
 	let editChannelBudgetText = $state<string>('');
+	// Same UX for the roundtrip-cap override.
+	let editChannelRoundtripText = $state<string>('');
 
 	let ws: WebSocket | null = null;
 
@@ -68,21 +76,25 @@
 			editGlobal.showGroomedDefault !== global.showGroomedDefault ||
 			editGlobal.hideSystemMessagesDefault !== global.hideSystemMessagesDefault ||
 			editGlobal.defaultChannelId !== global.defaultChannelId ||
-			editGlobal.theme !== global.theme
+			editGlobal.theme !== global.theme ||
+			editGlobal.roundtripCapDefault !== global.roundtripCapDefault
 		);
+	}
+
+	function parseNullableInt(text: string, fallback: number | null): number | null {
+		const t = text.trim();
+		if (t === '') return null;
+		const n = Number(t);
+		return Number.isFinite(n) ? n : fallback;
 	}
 
 	function dirtyChannel(): boolean {
 		if (!channelDetail || !editChannel) return false;
-		const textTrimmed = editChannelBudgetText.trim();
-		const editOverride =
-			textTrimmed === ''
-				? null
-				: Number.isFinite(Number(textTrimmed))
-					? Number(textTrimmed)
-					: editChannel.kbBudgetOverride;
+		const editBudget = parseNullableInt(editChannelBudgetText, editChannel.kbBudgetOverride);
+		const editRoundtrip = parseNullableInt(editChannelRoundtripText, editChannel.roundtripCapOverride);
 		return (
-			editOverride !== channelDetail.kbBudgetOverride ||
+			editBudget !== channelDetail.kbBudgetOverride ||
+			editRoundtrip !== channelDetail.roundtripCapOverride ||
 			editChannel.autoApprove !== channelDetail.autoApprove
 		);
 	}
@@ -117,9 +129,11 @@
 		channelDetail = data.channel as ChannelSettings;
 		editChannel = {
 			kbBudgetOverride: channelDetail.kbBudgetOverride,
-			autoApprove: channelDetail.autoApprove
+			autoApprove: channelDetail.autoApprove,
+			roundtripCapOverride: channelDetail.roundtripCapOverride
 		};
 		editChannelBudgetText = channelDetail.kbBudgetOverride?.toString() ?? '';
+		editChannelRoundtripText = channelDetail.roundtripCapOverride?.toString() ?? '';
 	}
 
 	async function saveGlobal() {
@@ -139,6 +153,8 @@
 			if (editGlobal.defaultChannelId !== global.defaultChannelId)
 				patch.defaultChannelId = editGlobal.defaultChannelId;
 			if (editGlobal.theme !== global.theme) patch.theme = editGlobal.theme;
+			if (editGlobal.roundtripCapDefault !== global.roundtripCapDefault)
+				patch.roundtripCapDefault = editGlobal.roundtripCapDefault;
 
 			if (Object.keys(patch).length === 0) return;
 
@@ -167,12 +183,12 @@
 		saveError = null;
 		savingChannel = true;
 		try {
-			const textTrimmed = editChannelBudgetText.trim();
+			const budgetText = editChannelBudgetText.trim();
 			let kbBudgetOverride: number | null;
-			if (textTrimmed === '') {
+			if (budgetText === '') {
 				kbBudgetOverride = null;
 			} else {
-				const n = Number(textTrimmed);
+				const n = Number(budgetText);
 				if (!Number.isInteger(n) || n < 1 || n > 100_000) {
 					saveError = 'KB budget override must be an integer between 1 and 100000, or empty to inherit.';
 					return;
@@ -180,11 +196,30 @@
 				kbBudgetOverride = n;
 			}
 
-			const patch: { kbBudgetOverride?: number | null; autoApprove?: boolean } = {};
+			const rtText = editChannelRoundtripText.trim();
+			let roundtripCapOverride: number | null;
+			if (rtText === '') {
+				roundtripCapOverride = null;
+			} else {
+				const n = Number(rtText);
+				if (!Number.isInteger(n) || n < 1 || n > 100) {
+					saveError = 'Roundtrip cap override must be an integer between 1 and 100, or empty to inherit.';
+					return;
+				}
+				roundtripCapOverride = n;
+			}
+
+			const patch: {
+				kbBudgetOverride?: number | null;
+				autoApprove?: boolean;
+				roundtripCapOverride?: number | null;
+			} = {};
 			if (kbBudgetOverride !== channelDetail.kbBudgetOverride)
 				patch.kbBudgetOverride = kbBudgetOverride;
 			if (editChannel.autoApprove !== channelDetail.autoApprove)
 				patch.autoApprove = editChannel.autoApprove;
+			if (roundtripCapOverride !== channelDetail.roundtripCapOverride)
+				patch.roundtripCapOverride = roundtripCapOverride;
 
 			if (Object.keys(patch).length === 0) return;
 
@@ -224,9 +259,11 @@
 		if (channelDetail) {
 			editChannel = {
 				kbBudgetOverride: channelDetail.kbBudgetOverride,
-				autoApprove: channelDetail.autoApprove
+				autoApprove: channelDetail.autoApprove,
+				roundtripCapOverride: channelDetail.roundtripCapOverride
 			};
 			editChannelBudgetText = channelDetail.kbBudgetOverride?.toString() ?? '';
+			editChannelRoundtripText = channelDetail.roundtripCapOverride?.toString() ?? '';
 		}
 	}
 
@@ -427,6 +464,23 @@
 						</span>
 					</div>
 
+					<div class="field">
+						<label for="roundtrip-cap">Agent-to-agent roundtrip cap</label>
+						<input
+							id="roundtrip-cap"
+							type="number"
+							min="1"
+							max="100"
+							step="1"
+							bind:value={editGlobal.roundtripCapDefault}
+						/>
+						<span class="unit">hops</span>
+						<span class="hint">
+							Per user-message window. Resets on every user message. Loop
+							defence for auto-approve channels (ADR-0020).
+						</span>
+					</div>
+
 					<div class="actions">
 						<button type="submit" disabled={!dirtyGlobal() || savingGlobal}>
 							{savingGlobal ? 'Saving…' : 'Save'}
@@ -483,6 +537,23 @@
 							When enabled, mentions from one agent to another in this channel
 							skip the approval queue. UI for the audit log lands with the
 							ADR-0015 PR stack.
+						</span>
+					</div>
+
+					<div class="field">
+						<label for="roundtrip-cap-ov">Roundtrip cap override</label>
+						<input
+							id="roundtrip-cap-ov"
+							type="number"
+							min="1"
+							max="100"
+							step="1"
+							placeholder={`inherit (${global.roundtripCapDefault})`}
+							bind:value={editChannelRoundtripText}
+						/>
+						<span class="unit">hops</span>
+						<span class="hint">
+							Empty = inherit global ({global.roundtripCapDefault}).
 						</span>
 					</div>
 

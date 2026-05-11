@@ -66,7 +66,8 @@ function readGlobal() {
 			showGroomedDefault: row.showGroomedDefault,
 			hideSystemMessagesDefault: row.hideSystemMessagesDefault,
 			defaultChannelId: row.defaultChannelId,
-			theme: row.theme
+			theme: row.theme,
+			roundtripCapDefault: row.roundtripCapDefault
 		};
 	}
 
@@ -75,7 +76,8 @@ function readGlobal() {
 		showGroomedDefault: false,
 		hideSystemMessagesDefault: false,
 		defaultChannelId: null,
-		theme: 'system' as const
+		theme: 'system' as const,
+		roundtripCapDefault: 5
 	};
 }
 
@@ -107,6 +109,7 @@ export const GET: RequestHandler = async ({ url }) => {
 
 	const kbBudgetOverride = overrideRow?.kbBudgetOverride ?? null;
 	const autoApprove = overrideRow?.autoApprove ?? false;
+	const roundtripCapOverride = overrideRow?.roundtripCapOverride ?? null;
 
 	return json({
 		global,
@@ -114,9 +117,11 @@ export const GET: RequestHandler = async ({ url }) => {
 			channelId,
 			kbBudgetOverride,
 			autoApprove,
+			roundtripCapOverride,
 			effective: {
 				kbBudget: kbBudgetOverride ?? global.kbBudgetDefault,
-				autoApprove
+				autoApprove,
+				roundtripCap: roundtripCapOverride ?? global.roundtripCapDefault
 			}
 		}
 	});
@@ -144,7 +149,8 @@ const UpdateGlobalSchema = z
 		showGroomedDefault: z.boolean().optional(),
 		hideSystemMessagesDefault: z.boolean().optional(),
 		defaultChannelId: z.string().min(1).nullable().optional(),
-		theme: z.enum(['system', 'light', 'dark']).optional()
+		theme: z.enum(['system', 'light', 'dark']).optional(),
+		roundtripCapDefault: z.number().int().min(1).max(100).optional()
 	})
 	.strict();
 
