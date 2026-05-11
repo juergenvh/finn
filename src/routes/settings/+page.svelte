@@ -69,8 +69,22 @@
 
 	let ws: WebSocket | null = null;
 
-	function dirtyGlobal(): boolean {
+	// $derived (not a plain function) so the Save / Discard buttons
+	// re-evaluate when editGlobal / editChannel mutate. Plain function
+	// calls in attribute position are not reactivity boundaries in
+	// Svelte 5 with runes — they're evaluated once per render and the
+	// render is not retriggered by inner-state changes.
+	function parseNullableInt(text: string, fallback: number | null): number | null {
+		const t = text.trim();
+		if (t === '') return null;
+		const n = Number(t);
+		return Number.isFinite(n) ? n : fallback;
+	}
+
+	let dirtyGlobal = $derived.by(() => {
 		if (!global || !editGlobal) return false;
+		// Number-inputs with bind:value emit numbers in Svelte 5, so direct
+		// !== works against the number snapshot. Same for theme/select.
 		return (
 			editGlobal.kbBudgetDefault !== global.kbBudgetDefault ||
 			editGlobal.showGroomedDefault !== global.showGroomedDefault ||
@@ -79,25 +93,21 @@
 			editGlobal.theme !== global.theme ||
 			editGlobal.roundtripCapDefault !== global.roundtripCapDefault
 		);
-	}
+	});
 
-	function parseNullableInt(text: string, fallback: number | null): number | null {
-		const t = text.trim();
-		if (t === '') return null;
-		const n = Number(t);
-		return Number.isFinite(n) ? n : fallback;
-	}
-
-	function dirtyChannel(): boolean {
+	let dirtyChannel = $derived.by(() => {
 		if (!channelDetail || !editChannel) return false;
 		const editBudget = parseNullableInt(editChannelBudgetText, editChannel.kbBudgetOverride);
-		const editRoundtrip = parseNullableInt(editChannelRoundtripText, editChannel.roundtripCapOverride);
+		const editRoundtrip = parseNullableInt(
+			editChannelRoundtripText,
+			editChannel.roundtripCapOverride
+		);
 		return (
 			editBudget !== channelDetail.kbBudgetOverride ||
 			editRoundtrip !== channelDetail.roundtripCapOverride ||
 			editChannel.autoApprove !== channelDetail.autoApprove
 		);
-	}
+	});
 
 	async function loadGlobal() {
 		const res = await fetch('/api/settings');
@@ -482,14 +492,14 @@
 					</div>
 
 					<div class="actions">
-						<button type="submit" disabled={!dirtyGlobal() || savingGlobal}>
+						<button type="submit" disabled={!dirtyGlobal || savingGlobal}>
 							{savingGlobal ? 'Saving…' : 'Save'}
 						</button>
 						<button
 							type="button"
 							class="secondary"
 							onclick={discardGlobal}
-							disabled={!dirtyGlobal() || savingGlobal}
+							disabled={!dirtyGlobal || savingGlobal}
 						>
 							Discard
 						</button>
@@ -558,14 +568,14 @@
 					</div>
 
 					<div class="actions">
-						<button type="submit" disabled={!dirtyChannel() || savingChannel}>
+						<button type="submit" disabled={!dirtyChannel || savingChannel}>
 							{savingChannel ? 'Saving…' : 'Save'}
 						</button>
 						<button
 							type="button"
 							class="secondary"
 							onclick={discardChannel}
-							disabled={!dirtyChannel() || savingChannel}
+							disabled={!dirtyChannel || savingChannel}
 						>
 							Discard
 						</button>
