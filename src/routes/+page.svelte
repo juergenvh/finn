@@ -301,23 +301,53 @@
 	/* ---------- data fetching ---------- */
 
 	/**
-	 * Initial-load budget for a channel, in kilobytes (issue #13).
-	 * The channel view is a conversation surface, not an archive — the
-	 * full history is reachable via 'Load older' and the protocol
-	 * viewer (#14, when it lands), so the budget on first paint stays
-	 * tight enough that opening a four-month-old chat does not bury
-	 * the user in scroll.
+	 * Hardcoded fallback for the initial-load budget when neither a
+	 * per-channel override nor a global setting can be read. The
+	 * full precedence chain (ADR-0019) is:
+	 *   channel override → global default → this constant.
 	 *
-	 * 200 KB is the current pragmatic middle ground; a long quiet
-	 * channel still surfaces its useful context, a chatty one stops
-	 * before becoming a wall of text. Per-channel and per-user
-	 * tuning is tracked as part of issue #18 (settings surface).
+	 * 200 KB is the same value the seed migration writes into
+	 * `settings_global.kb_budget_default`; keeping it here as a
+	 * code-side fallback means a missing or unreachable
+	 * `/api/settings` degrades to identical behaviour rather than to
+	 * zero (which would render an empty channel) or unbounded.
+	 *
+	 * Per-channel and global tuning live in the `/settings` surface
+	 * (ADR-0019, issue #18).
 	 */
-	const INITIAL_BUDGET_KB = 200;
+	const KB_BUDGET_FALLBACK = 200;
+
+	/**
+	 * Per-channel effective KB budget, populated on first load and
+	 * refreshed when the settings broadcast tells us the relevant
+	 * scope changed. Missing entry = use the global default (cached
+	 * separately below) or the hardcoded fallback.
+	 */
+	let channelKbBudget = $state<Record<string, number>>({});
+	let globalKbBudget = $state<number>(KB_BUDGET_FALLBACK);
+
+	async function loadSettingsForChannel(channelId: string): Promise<number> {
+		try {
+			const res = await fetch(`/api/settings?channelId=${encodeURIComponent(channelId)}`);
+			if (!res.ok) return globalKbBudget;
+			const data = await res.json();
+			const eff = data?.channel?.effective?.kbBudget;
+			const globalDefault = data?.global?.kbBudgetDefault;
+			if (typeof globalDefault === 'number') globalKbBudget = globalDefault;
+			if (typeof eff === 'number') {
+				channelKbBudget = { ...channelKbBudget, [channelId]: eff };
+				return eff;
+			}
+			return globalDefault ?? KB_BUDGET_FALLBACK;
+		} catch {
+			return globalKbBudget;
+		}
+	}
 
 	async function loadChannelData(channelId: string) {
+		const budgetKb = await loadSettingsForChannel(channelId);
 		const [msgRes, memRes, apprRes] = await Promise.all([
-			fetch(`/api/channels/${channelId}/messages?budget=${INITIAL_BUDGET_KB}`),
+			fetch(`/api/channels/${channelId}/messages?budget=${budgetKb}`),
 			fetch(`/api/channels/${channelId}/members`),
 			fetch(`/api/channels/${channelId}/approvals`)
 		]);
@@ -600,6 +630,28 @@
 			} else if (msg.entity === 'channel_member') {
 				if (messagesByChannel[msg.id] !== undefined) {
 					await loadChannelData(msg.id);
+				}
+			} else if (msg.entity === 'settings') {
+				// Settings change (ADR-0019). Two scopes:
+				//   id === 'global'    → global default changed; re-fetch
+				//                        for every loaded channel, since any
+				//                        channel without an override picks up
+				//                        the new global value.
+				//   id === <channelId> → single-channel override changed;
+				//                        only that channel's effective values
+				//                        moved.
+				//
+				// We deliberately do NOT reload the full message body for
+				// the affected channels here — a KB-budget change only
+				// affects *initial* load, not in-place display. The next
+				// time the user opens the channel, the new budget applies.
+				// Tracking the cached `effective` value is enough.
+				if (msg.id === 'global') {
+					for (const channelId of Object.keys(messagesByChannel)) {
+						await loadSettingsForChannel(channelId);
+					}
+				} else if (messagesByChannel[msg.id] !== undefined) {
+					await loadSettingsForChannel(msg.id);
 				}
 			} else if (msg.entity === 'message') {
 				// Visibility change. Update the in-memory record without
