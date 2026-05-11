@@ -1,0 +1,37 @@
+/*
+ * App-wide baseline. Applies on every route (loaded by +layout.svelte).
+ *
+ * Holds the dark colour scheme so /settings, /protocol and any future
+ * route inherit the same base instead of each page redeclaring it
+ * locally. Page-level component styles read these as a starting point
+ * and override where the page differs.
+ *
+ * A future theming PR (separate from ADR-0019) introduces CSS variables
+ * for `data-theme="light|dark"` switching; until then the dark scheme
+ * is the only one.
+ */
+
+html,
+body {
+	margin: 0;
+	height: 100%;
+	font-family: ui-sans-serif, system-ui, sans-serif;
+	background: #0e0e10;
+	color: #e8e8ea;
+}
+
+/* The main channel view sets overflow:hidden on html,body because it
+ * owns the scrollable surface internally. Other routes (settings,
+ * protocol search) want normal document scroll, so we scope the
+ * overflow lock to the channel view via a body class set in +page.svelte
+ * if/when it grows beyond what current rules cover. Today the channel
+ * view re-asserts overflow:hidden in its own scope-global block; nothing
+ * else needs to. */
+
+a {
+	color: #6ee7b7;
+}
+
+a:hover {
+	color: #a7f3d0;
+}

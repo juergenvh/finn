@@ -516,17 +516,25 @@
 </div>
 
 <style>
+	/*
+	 * Styled to match the channel-view dark palette
+	 * (#0e0e10 / #16161a / #1f1f24 / #2a2a30 / #e8e8ea / #94a3b8).
+	 * Channel view (+page.svelte) and protocol search keep their own
+	 * scoped styles; this page reads the same palette so the side rail
+	 * doesn't flash white on navigation.
+	 */
 	.settings-page {
 		display: grid;
 		grid-template-columns: 240px 1fr;
 		min-height: 100vh;
-		font-family: system-ui, sans-serif;
+		background: #0e0e10;
+		color: #e8e8ea;
 	}
 
 	.rail {
-		border-right: 1px solid #e0e0e0;
+		border-right: 1px solid #2a2a30;
 		padding: 16px;
-		background: #fafafa;
+		background: #16161a;
 	}
 
 	.rail h2 {
@@ -534,7 +542,7 @@
 		font-size: 1rem;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-		color: #666;
+		color: #94a3b8;
 	}
 
 	.rail nav {
@@ -551,15 +559,16 @@
 		border-radius: 4px;
 		cursor: pointer;
 		font: inherit;
-		color: inherit;
+		color: #cbd5e1;
 	}
 
 	.rail button:hover {
-		background: #eee;
+		background: #1f1f24;
 	}
 
 	.rail button.active {
-		background: #ddd;
+		background: #2a2a30;
+		color: #e8e8ea;
 		font-weight: 600;
 	}
 
@@ -569,12 +578,12 @@
 		font-size: 0.75rem;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-		color: #888;
+		color: #64748b;
 	}
 
 	.rail-empty {
 		padding: 6px 10px;
-		color: #999;
+		color: #64748b;
 		font-style: italic;
 		font-size: 0.9rem;
 	}
@@ -584,6 +593,15 @@
 		font-size: 0.85rem;
 	}
 
+	.rail-foot a {
+		color: #6ee7b7;
+		text-decoration: none;
+	}
+
+	.rail-foot a:hover {
+		color: #a7f3d0;
+	}
+
 	.pane {
 		padding: 24px 32px;
 		max-width: 720px;
@@ -591,10 +609,11 @@
 
 	.pane h1 {
 		margin-top: 0;
+		color: #f1f5f9;
 	}
 
 	.note {
-		color: #555;
+		color: #94a3b8;
 		font-size: 0.9rem;
 		max-width: 60ch;
 	}
@@ -615,7 +634,16 @@
 
 	.field label {
 		font-weight: 600;
-		color: #333;
+		color: #cbd5e1;
+	}
+
+	.field input[type='number'],
+	.field select {
+		background: #1f1f24;
+		color: #e8e8ea;
+		border: 1px solid #2a2a30;
+		border-radius: 4px;
+		font: inherit;
 	}
 
 	.field input[type='number'] {
@@ -628,13 +656,19 @@
 		min-width: 180px;
 	}
 
+	.field input[type='checkbox'] {
+		accent-color: #6ee7b7;
+		width: 16px;
+		height: 16px;
+	}
+
 	.field .unit {
-		color: #666;
+		color: #94a3b8;
 	}
 
 	.field .hint {
 		grid-column: 2 / -1;
-		color: #888;
+		color: #64748b;
 		font-size: 0.8rem;
 		margin-top: 2px;
 	}
@@ -649,44 +683,45 @@
 		padding: 6px 14px;
 		font: inherit;
 		cursor: pointer;
-		border: 1px solid #888;
-		background: #2563eb;
-		color: white;
+		border: 1px solid #2a2a30;
+		background: #1f2937;
+		color: #f1f5f9;
 		border-radius: 4px;
 	}
 
 	.actions button:hover:not(:disabled) {
-		background: #1d4ed8;
+		background: #2a3441;
 	}
 
 	.actions button:disabled {
-		opacity: 0.5;
+		opacity: 0.4;
 		cursor: not-allowed;
 	}
 
 	.actions button.secondary {
-		background: white;
-		color: #333;
+		background: transparent;
+		color: #cbd5e1;
 	}
 
 	.actions button.secondary:hover:not(:disabled) {
-		background: #f5f5f5;
+		background: #1f1f24;
 	}
 
 	.actions button.danger {
-		background: white;
-		color: #b00020;
-		border-color: #b00020;
+		background: transparent;
+		color: #fca5a5;
+		border-color: #4a1f1f;
 		margin-left: auto;
 	}
 
 	.actions button.danger:hover:not(:disabled) {
-		background: #fdecea;
+		background: #3a1a1a;
 	}
 
 	.error {
-		color: #b00020;
-		background: #fdecea;
+		color: #fca5a5;
+		background: #3a1a1a;
+		border: 1px solid #4a1f1f;
 		padding: 8px 12px;
 		border-radius: 4px;
 	}
