@@ -1,7 +1,10 @@
 # ADR 0019 — Settings surface: global defaults + per-channel overrides
 
-- **Status:** proposed
+- **Status:** accepted (shipped 2026-05-11)
 - **Date:** 2026-05-11
+- **Shipped via:** #71 (schema + read API + skeleton),
+  #72 (PATCH + WS + KB-budget migration), #73 (edit controls +
+  channel-header gear), #74 (dark-palette style fix).
 - **Deciders:** Jürgen, Dixie
 - **Related:** Issue #18 (this discovery), Issue #13 (KB-budget
   motivator), Issue #28 (per-channel auto-approve — direct
@@ -258,19 +261,47 @@ agent-side enforcement.
   singleton; the migration to per-user is a straightforward
   schema change later.
 
-## Open questions for review
+## Open questions — resolved
 
-1. **Theme persistence in DB vs `localStorage`?** I argued DB
-   (survives device swaps, syncs across tabs). The cost is one
-   round-trip per page-load to determine theme — a flash of
-   wrong theme is possible. Acceptable, or push it back into
-   `localStorage`?
-2. **Channel-header gear icon — too noisy?** It's per-channel
-   discoverability but eats header real-estate. Acceptable, or
-   keep `/settings` as the only entry point?
-3. **Is the `settings_global` singleton-row pattern too cute?**
-   Alternative: no table, store globals as a `JSON` column on a
-   `meta` table that already exists, or in app config loaded
-   at boot. I prefer the explicit singleton row for
-   queryability and the migration trail it leaves; happy to
-   walk back if you'd rather not.
+Decisions taken before / during implementation, recorded here for
+the trail.
+
+1. **Theme persistence in DB vs `localStorage` — decided DB.**
+   The cost of a flash-of-wrong-theme on page load is acceptable
+   in exchange for cross-device + cross-tab consistency, and the
+   `data-theme` attribute is written eagerly enough that the flash
+   in practice is invisible. The actual dark-mode stylesheet
+   refactor is a separate future PR; the column is real and the
+   picker functional.
+2. **Channel-header gear icon — decided keep.** Shipped as a
+   small ⚙ link next to Export (#73), deep-links to
+   `/settings#<channelId>`. Visually unobtrusive, the action bar
+   still reads cleanly.
+3. **`settings_global` singleton-row pattern — decided keep.**
+   The explicit `id = 1` row with a seed insert in migration
+   `0003` worked out clean: typed-column reads, no JSON parsing
+   at the application boundary, and one migration per new global
+   setting is genuinely cheap (the alternative was a single JSON
+   column on a hypothetical `meta` table, which gives up the
+   typed-column benefit for negligible flexibility gain at
+   finn's scale).
+
+## Follow-ups
+
+Three items uncovered during implementation, parked for future
+work:
+
+- **Dark-mode CSS-variable refactor.** The `data-theme` attribute
+  is written on `<html>` but no CSS reads it yet. The future
+  styling PR introduces variables and the actual light/dark
+  switching; ADR-0019's job ends at "the setting is real and
+  writable".
+- **`/settings` style-baseline.** PR #74 introduced `src/app.css`
+  for an app-wide dark baseline. The duplicate
+  `:global(html, body)` block in `src/routes/+page.svelte` can be
+  removed in a small follow-up; it's currently harmless
+  redundancy but the deduplication would be one less place to
+  remember.
+- **Approval-default-targets as a setting.** Deliberately deferred
+  in this ADR. If it ever becomes a setting it lands in a
+  follow-up ADR that engages with ADR-0005.
