@@ -1160,6 +1160,17 @@
 						<button class="export-btn" onclick={exportChannel} title="export to markdown">
 							Export
 						</button>
+						<!-- Channel-scoped settings shortcut (ADR-0019). The
+							 /settings route renders the per-channel pane when
+							 the channel id is in the URL fragment. -->
+						<a
+							class="settings-link"
+							href={`/settings#${activeChannel.id}`}
+							title="channel settings"
+							aria-label="channel settings"
+						>
+							⚙
+						</a>
 					</div>
 				</div>
 			{:else}
@@ -1579,6 +1590,26 @@
 		font-size: 0.85rem;
 		border-radius: 4px;
 		cursor: pointer;
+	}
+	.settings-link {
+		/* Channel-scoped settings shortcut (ADR-0019). Sits next to
+		   Export, opens /settings with the channel pre-selected via
+		   URL fragment. Visual matches export-btn so the action bar
+		   stays cohesive. */
+		background: #2a2a30;
+		color: #e8e8ea;
+		border: 1px solid #3a3a42;
+		padding: 0.35rem 0.6rem;
+		font-family: inherit;
+		font-size: 0.95rem;
+		border-radius: 4px;
+		text-decoration: none;
+		display: inline-flex;
+		align-items: center;
+		line-height: 1;
+	}
+	.settings-link:hover {
+		background: #34343c;
 	}
 	.error {
 		background: #3a1a1a;
