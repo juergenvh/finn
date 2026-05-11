@@ -147,6 +147,66 @@ export const approvals = sqliteTable('approvals', {
 	decidedAt: integer('decided_at')
 });
 
+/* ------------------------------------------------------------------ settings */
+
+/**
+ * Global runtime settings (ADR-0019).
+ *
+ * Singleton table — exactly one row, identified by `id = 1`. The
+ * application layer upserts on that id; there is never more than one
+ * row. Migrations add columns for each new global setting; cost of
+ * one migration per setting is accepted in exchange for typed
+ * columns, validation-for-free, and a self-documenting schema.
+ *
+ * Defaults here are the *hardcoded* defaults — the same constants
+ * the code falls back to if the row is missing entirely. The seed
+ * migration writes the row at id=1 with these values; subsequent
+ * changes are UPDATEs.
+ */
+export const settingsGlobal = sqliteTable('settings_global', {
+	id: integer('id').primaryKey(),
+	/** Initial-load KB budget for the channel view (ADR-0011, issue #13). */
+	kbBudgetDefault: integer('kb_budget_default').notNull().default(200),
+	/** Default value for the channel view's `Show groomed` toggle (issue #15). */
+	showGroomedDefault: integer('show_groomed_default', { mode: 'boolean' }).notNull().default(false),
+	/** Default value for the channel view's `Hide system messages` toggle. */
+	hideSystemMessagesDefault: integer('hide_system_messages_default', { mode: 'boolean' })
+		.notNull()
+		.default(false),
+	/** Channel id to open by default when the user lands on `/`.
+	 * NULL → fall back to last-active (current behaviour). */
+	defaultChannelId: text('default_channel_id'),
+	/** Theme preference, persisted in DB so it survives device swaps. */
+	theme: text('theme', { enum: ['system', 'light', 'dark'] })
+		.notNull()
+		.default('system'),
+	updatedAt: integer('updated_at').notNull()
+});
+
+/**
+ * Per-channel setting overrides (ADR-0019).
+ *
+ * One row per channel that has at least one override; channels
+ * without a row inherit global on every key. `ON DELETE CASCADE`
+ * keeps the table tidy when a channel is hard-deleted (future
+ * channel-name-reuse work, issue #25).
+ *
+ * Precedence: channel override → global → compiled constant.
+ */
+export const settingsChannel = sqliteTable('settings_channel', {
+	channelId: text('channel_id')
+		.primaryKey()
+		.references(() => channels.id, { onDelete: 'cascade' }),
+	/** Channel-specific override for the initial-load KB budget.
+	 * NULL → inherit `settings_global.kb_budget_default`. */
+	kbBudgetOverride: integer('kb_budget_override'),
+	/** Per-channel auto-approve toggle for agent-to-agent mentions
+	 * (ADR-0015, issue #28). Default false; the UI surface that
+	 * flips it lands in the ADR-0015 PR stack on top of this column. */
+	autoApprove: integer('auto_approve', { mode: 'boolean' }).notNull().default(false),
+	updatedAt: integer('updated_at').notNull()
+});
+
 /* ------------------------------------------------------------------ types */
 
 export type Agent = typeof agents.$inferSelect;
@@ -157,3 +217,7 @@ export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
 export type Approval = typeof approvals.$inferSelect;
 export type NewApproval = typeof approvals.$inferInsert;
+export type SettingsGlobal = typeof settingsGlobal.$inferSelect;
+export type NewSettingsGlobal = typeof settingsGlobal.$inferInsert;
+export type SettingsChannel = typeof settingsChannel.$inferSelect;
+export type NewSettingsChannel = typeof settingsChannel.$inferInsert;
