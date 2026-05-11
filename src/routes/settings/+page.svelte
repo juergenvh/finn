@@ -83,15 +83,19 @@
 
 	let dirtyGlobal = $derived.by(() => {
 		if (!global || !editGlobal) return false;
-		// Number-inputs with bind:value emit numbers in Svelte 5, so direct
-		// !== works against the number snapshot. Same for theme/select.
+		// Coerce numeric fields with Number(...) so a string-shaped bind
+		// value (Svelte 5 inputs occasionally emit string for numeric
+		// inputs depending on bind resolution) still compares correctly
+		// against the number snapshot. Without this, "250" !== 200 keeps
+		// the form dirty forever even after Save — and the wire payload
+		// fails zod validation.
 		return (
-			editGlobal.kbBudgetDefault !== global.kbBudgetDefault ||
+			Number(editGlobal.kbBudgetDefault) !== Number(global.kbBudgetDefault) ||
 			editGlobal.showGroomedDefault !== global.showGroomedDefault ||
 			editGlobal.hideSystemMessagesDefault !== global.hideSystemMessagesDefault ||
 			editGlobal.defaultChannelId !== global.defaultChannelId ||
 			editGlobal.theme !== global.theme ||
-			editGlobal.roundtripCapDefault !== global.roundtripCapDefault
+			Number(editGlobal.roundtripCapDefault) !== Number(global.roundtripCapDefault)
 		);
 	});
 
@@ -151,11 +155,21 @@
 		saveError = null;
 		savingGlobal = true;
 		try {
+			// Svelte 5's `bind:value` on <input type="number"> bound to a
+			// $state field does not reliably emit a number across all
+			// configurations — the value can land in the field as a
+			// string, which the zod-strict server rejects with 400. Force
+			// the cast at the patch boundary so the wire is always
+			// number-typed regardless of how the bind resolved.
+			const editKb = Number(editGlobal.kbBudgetDefault);
+			const origKb = Number(global.kbBudgetDefault);
+			const editCap = Number(editGlobal.roundtripCapDefault);
+			const origCap = Number(global.roundtripCapDefault);
+
 			// Send only the keys that changed. Empty patch is a no-op
 			// at the server but we still avoid the round-trip.
 			const patch: Partial<Global> = {};
-			if (editGlobal.kbBudgetDefault !== global.kbBudgetDefault)
-				patch.kbBudgetDefault = editGlobal.kbBudgetDefault;
+			if (editKb !== origKb) patch.kbBudgetDefault = editKb;
 			if (editGlobal.showGroomedDefault !== global.showGroomedDefault)
 				patch.showGroomedDefault = editGlobal.showGroomedDefault;
 			if (editGlobal.hideSystemMessagesDefault !== global.hideSystemMessagesDefault)
@@ -163,8 +177,7 @@
 			if (editGlobal.defaultChannelId !== global.defaultChannelId)
 				patch.defaultChannelId = editGlobal.defaultChannelId;
 			if (editGlobal.theme !== global.theme) patch.theme = editGlobal.theme;
-			if (editGlobal.roundtripCapDefault !== global.roundtripCapDefault)
-				patch.roundtripCapDefault = editGlobal.roundtripCapDefault;
+			if (editCap !== origCap) patch.roundtripCapDefault = editCap;
 
 			if (Object.keys(patch).length === 0) return;
 
@@ -175,7 +188,11 @@
 			});
 			if (!res.ok) {
 				const msg = await res.text().catch(() => '');
-				saveError = `Save failed: ${res.status} ${msg.slice(0, 200)}`;
+				// Surface the full server message; zod errors carry the
+				// field path which is exactly what a future-me wants to
+				// see when a bind-shape regresses.
+				console.error('[settings] PATCH /api/settings failed', res.status, msg);
+				saveError = `Save failed: ${res.status} ${msg.slice(0, 400)}`;
 				return;
 			}
 			// The WS broadcast will reload + re-seed editGlobal. As a
@@ -193,7 +210,11 @@
 		saveError = null;
 		savingChannel = true;
 		try {
-			const budgetText = editChannelBudgetText.trim();
+			// Both override fields use text-bound inputs (Svelte 5 number
+			// inputs with `placeholder` behave more predictably as text
+			// with explicit parsing) so the parse is already manual; just
+			// keep the existing validation.
+			const budgetText = String(editChannelBudgetText).trim();
 			let kbBudgetOverride: number | null;
 			if (budgetText === '') {
 				kbBudgetOverride = null;
@@ -206,7 +227,7 @@
 				kbBudgetOverride = n;
 			}
 
-			const rtText = editChannelRoundtripText.trim();
+			const rtText = String(editChannelRoundtripText).trim();
 			let roundtripCapOverride: number | null;
 			if (rtText === '') {
 				roundtripCapOverride = null;
@@ -240,7 +261,12 @@
 			});
 			if (!res.ok) {
 				const msg = await res.text().catch(() => '');
-				saveError = `Save failed: ${res.status} ${msg.slice(0, 200)}`;
+				console.error(
+					'[settings] PATCH /api/settings/channel failed',
+					res.status,
+					msg
+				);
+				saveError = `Save failed: ${res.status} ${msg.slice(0, 400)}`;
 				return;
 			}
 			await loadChannelDetail(selected);
