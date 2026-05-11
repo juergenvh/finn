@@ -65,8 +65,13 @@ export type ApprovalSnapshot = {
 
 export type WSStateChanged = {
 	type: 'state_changed';
-	entity: 'channel' | 'agent' | 'channel_member' | 'message';
+	entity: 'channel' | 'agent' | 'channel_member' | 'message' | 'settings';
 	action: 'created' | 'updated' | 'deleted';
+	/** For `entity === 'settings'`: `'global'` when the global row
+	 * changed, otherwise the channel id whose override row was
+	 * created/updated/deleted (ADR-0019). For other entities, the
+	 * row primary key (or channel id for channel_member / message
+	 * visibility). */
 	id: string;
 	extra?: Record<string, string | number | boolean | null>;
 };

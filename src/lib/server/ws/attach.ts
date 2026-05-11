@@ -183,12 +183,17 @@ export type BroadcastSystem = {
 
 export type BroadcastStateChanged = {
 	type: 'state_changed';
-	entity: 'channel' | 'agent' | 'channel_member' | 'message';
+	entity: 'channel' | 'agent' | 'channel_member' | 'message' | 'settings';
 	action: 'created' | 'updated' | 'deleted';
 	/** primary key of the affected row. For channel_member, this is
 	 * the channel id; the affected agent is in `extra.agent_id`. For
 	 * message updates (e.g. visibility / grooming), the channel id
-	 * is in `extra.channel_id` so subscribers can scope updates. */
+	 * is in `extra.channel_id` so subscribers can scope updates.
+	 *
+	 * For `settings` (ADR-0019), `id` is either the literal string
+	 * `"global"` (when the global row changed) or the channel id
+	 * whose per-channel override row was created/updated/deleted.
+	 * Subscribers compare `id` directly; no `extra.scope` needed. */
 	id: string;
 	extra?: Record<string, string | number | boolean | null>;
 };
