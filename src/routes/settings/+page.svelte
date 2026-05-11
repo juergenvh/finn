@@ -1,21 +1,18 @@
 <!--
-  Settings surface (ADR-0019).
+  Settings surface (ADR-0019, PR 3).
 
-  This is the PR-1 skeleton: read-only display of global + per-channel
-  settings, with a left rail that lets the user switch between the
-  global pane and per-channel detail. No editing yet — PR 2 adds the
-  PATCH endpoints and wires inputs.
+  Editable surface for global + per-channel settings. Reads via
+  GET /api/settings, writes via PATCH /api/settings and
+  PATCH /api/settings/channel/<id>. Stays fresh through the
+  state_changed WebSocket broadcasts that the PATCH handlers emit.
 
-  Layout:
-    - Left rail: "Global" entry plus one entry per channel.
-    - Main pane: the values for the currently-selected scope, with
-      effective-value annotations where channel overrides apply.
-
-  The route is deliberately minimal CSS-wise; the styling pass lands
-  with the editable controls in PR 2 so we don't paint twice.
+  Writes use a small dirty-flag + Save-button pattern rather than
+  on-blur autosave. The user explicitly commits; the saved state
+  reflects back via the WS broadcast (which is also what every
+  other open tab sees).
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 
 	type Theme = 'system' | 'light' | 'dark';
 
@@ -36,11 +33,59 @@
 
 	type ChannelInfo = { id: string; name: string };
 
+	type WSStateChanged = {
+		type: 'state_changed';
+		entity: 'settings' | 'channel' | 'agent' | 'channel_member' | 'message';
+		action: 'created' | 'updated' | 'deleted';
+		id: string;
+	};
+
 	let channels = $state<ChannelInfo[]>([]);
 	let global = $state<Global | null>(null);
 	let selected = $state<string>('global'); // 'global' | channelId
 	let channelDetail = $state<ChannelSettings | null>(null);
 	let loadError = $state<string | null>(null);
+	let saveError = $state<string | null>(null);
+	let savingGlobal = $state(false);
+	let savingChannel = $state(false);
+
+	// Editable buffers. We do NOT bind directly to `global` / `channelDetail`
+	// because the WS broadcast reload would clobber unsaved edits. The
+	// buffers are seeded on load and on "discard"; Save flushes them.
+	let editGlobal = $state<Global | null>(null);
+	let editChannel = $state<{ kbBudgetOverride: number | null; autoApprove: boolean } | null>(null);
+	// Channel `kbBudgetOverride` UX: textbox bound to a string so the user
+	// can type and clear freely. Empty string = "inherit global" (null on
+	// the wire). Numeric out-of-range surfaces as validation on Save.
+	let editChannelBudgetText = $state<string>('');
+
+	let ws: WebSocket | null = null;
+
+	function dirtyGlobal(): boolean {
+		if (!global || !editGlobal) return false;
+		return (
+			editGlobal.kbBudgetDefault !== global.kbBudgetDefault ||
+			editGlobal.showGroomedDefault !== global.showGroomedDefault ||
+			editGlobal.hideSystemMessagesDefault !== global.hideSystemMessagesDefault ||
+			editGlobal.defaultChannelId !== global.defaultChannelId ||
+			editGlobal.theme !== global.theme
+		);
+	}
+
+	function dirtyChannel(): boolean {
+		if (!channelDetail || !editChannel) return false;
+		const textTrimmed = editChannelBudgetText.trim();
+		const editOverride =
+			textTrimmed === ''
+				? null
+				: Number.isFinite(Number(textTrimmed))
+					? Number(textTrimmed)
+					: editChannel.kbBudgetOverride;
+		return (
+			editOverride !== channelDetail.kbBudgetOverride ||
+			editChannel.autoApprove !== channelDetail.autoApprove
+		);
+	}
 
 	async function loadGlobal() {
 		const res = await fetch('/api/settings');
@@ -50,6 +95,7 @@
 		}
 		const data = await res.json();
 		global = data.global as Global;
+		editGlobal = { ...global };
 	}
 
 	async function loadChannels() {
@@ -61,6 +107,7 @@
 
 	async function loadChannelDetail(channelId: string) {
 		channelDetail = null;
+		editChannel = null;
 		const res = await fetch(`/api/settings?channelId=${encodeURIComponent(channelId)}`);
 		if (!res.ok) {
 			loadError = `Failed to load channel settings: ${res.status}`;
@@ -68,11 +115,164 @@
 		}
 		const data = await res.json();
 		channelDetail = data.channel as ChannelSettings;
+		editChannel = {
+			kbBudgetOverride: channelDetail.kbBudgetOverride,
+			autoApprove: channelDetail.autoApprove
+		};
+		editChannelBudgetText = channelDetail.kbBudgetOverride?.toString() ?? '';
+	}
+
+	async function saveGlobal() {
+		if (!editGlobal || !global) return;
+		saveError = null;
+		savingGlobal = true;
+		try {
+			// Send only the keys that changed. Empty patch is a no-op
+			// at the server but we still avoid the round-trip.
+			const patch: Partial<Global> = {};
+			if (editGlobal.kbBudgetDefault !== global.kbBudgetDefault)
+				patch.kbBudgetDefault = editGlobal.kbBudgetDefault;
+			if (editGlobal.showGroomedDefault !== global.showGroomedDefault)
+				patch.showGroomedDefault = editGlobal.showGroomedDefault;
+			if (editGlobal.hideSystemMessagesDefault !== global.hideSystemMessagesDefault)
+				patch.hideSystemMessagesDefault = editGlobal.hideSystemMessagesDefault;
+			if (editGlobal.defaultChannelId !== global.defaultChannelId)
+				patch.defaultChannelId = editGlobal.defaultChannelId;
+			if (editGlobal.theme !== global.theme) patch.theme = editGlobal.theme;
+
+			if (Object.keys(patch).length === 0) return;
+
+			const res = await fetch('/api/settings', {
+				method: 'PATCH',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(patch)
+			});
+			if (!res.ok) {
+				const msg = await res.text().catch(() => '');
+				saveError = `Save failed: ${res.status} ${msg.slice(0, 200)}`;
+				return;
+			}
+			// The WS broadcast will reload + re-seed editGlobal. As a
+			// belt-and-braces measure (e.g. if the WS is disconnected),
+			// reload immediately too.
+			await loadGlobal();
+			applyThemeToHtml(global!.theme);
+		} finally {
+			savingGlobal = false;
+		}
+	}
+
+	async function saveChannel() {
+		if (!editChannel || !channelDetail) return;
+		saveError = null;
+		savingChannel = true;
+		try {
+			const textTrimmed = editChannelBudgetText.trim();
+			let kbBudgetOverride: number | null;
+			if (textTrimmed === '') {
+				kbBudgetOverride = null;
+			} else {
+				const n = Number(textTrimmed);
+				if (!Number.isInteger(n) || n < 1 || n > 100_000) {
+					saveError = 'KB budget override must be an integer between 1 and 100000, or empty to inherit.';
+					return;
+				}
+				kbBudgetOverride = n;
+			}
+
+			const patch: { kbBudgetOverride?: number | null; autoApprove?: boolean } = {};
+			if (kbBudgetOverride !== channelDetail.kbBudgetOverride)
+				patch.kbBudgetOverride = kbBudgetOverride;
+			if (editChannel.autoApprove !== channelDetail.autoApprove)
+				patch.autoApprove = editChannel.autoApprove;
+
+			if (Object.keys(patch).length === 0) return;
+
+			const res = await fetch(`/api/settings/channel/${encodeURIComponent(selected)}`, {
+				method: 'PATCH',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(patch)
+			});
+			if (!res.ok) {
+				const msg = await res.text().catch(() => '');
+				saveError = `Save failed: ${res.status} ${msg.slice(0, 200)}`;
+				return;
+			}
+			await loadChannelDetail(selected);
+		} finally {
+			savingChannel = false;
+		}
+	}
+
+	async function resetChannelToGlobal() {
+		if (!confirm('Reset all per-channel overrides for this channel?')) return;
+		const res = await fetch(`/api/settings/channel/${encodeURIComponent(selected)}`, {
+			method: 'DELETE'
+		});
+		if (!res.ok) {
+			saveError = `Reset failed: ${res.status}`;
+			return;
+		}
+		await loadChannelDetail(selected);
+	}
+
+	function discardGlobal() {
+		if (global) editGlobal = { ...global };
+	}
+
+	function discardChannel() {
+		if (channelDetail) {
+			editChannel = {
+				kbBudgetOverride: channelDetail.kbBudgetOverride,
+				autoApprove: channelDetail.autoApprove
+			};
+			editChannelBudgetText = channelDetail.kbBudgetOverride?.toString() ?? '';
+		}
+	}
+
+	function applyThemeToHtml(theme: Theme) {
+		// Minimal theme-attribute hook. Actual dark-mode CSS-variable
+		// restyling is deliberately out of scope of ADR-0019 — this
+		// just makes the picker functional and persists the choice,
+		// so a future styling PR has somewhere to read from.
+		if (typeof document !== 'undefined') {
+			document.documentElement.dataset.theme = theme;
+		}
+	}
+
+	function connectWs() {
+		// Same path as the main app's WS (/ws). We only listen for the
+		// settings entity; everything else is ignored.
+		const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+		const url = `${proto}//${window.location.host}/ws`;
+		try {
+			ws = new WebSocket(url);
+		} catch {
+			return;
+		}
+		ws.onmessage = async (ev) => {
+			let msg: WSStateChanged;
+			try {
+				msg = JSON.parse(ev.data);
+			} catch {
+				return;
+			}
+			if (msg.type !== 'state_changed' || msg.entity !== 'settings') return;
+			if (msg.id === 'global') {
+				await loadGlobal();
+				// If we're viewing a per-channel pane, the effective
+				// values may have moved too (inherited budget changes).
+				if (selected !== 'global') await loadChannelDetail(selected);
+			} else if (msg.id === selected) {
+				await loadChannelDetail(selected);
+			}
+		};
 	}
 
 	$effect(() => {
 		if (selected === 'global') {
 			channelDetail = null;
+			editChannel = null;
 		} else if (selected) {
 			loadChannelDetail(selected);
 		}
@@ -80,6 +280,33 @@
 
 	onMount(async () => {
 		await Promise.all([loadGlobal(), loadChannels()]);
+		if (global) applyThemeToHtml(global.theme);
+		// Deep-link via /settings#<channelId>. The channel-header gear
+		// in +page.svelte produces such a link. Hash takes effect after
+		// the channel list has loaded so the selection is recognised.
+		const hash = window.location.hash.replace(/^#/, '');
+		if (hash && channels.some((c) => c.id === hash)) {
+			selected = hash;
+		}
+		window.addEventListener('hashchange', onHashChange);
+		connectWs();
+	});
+
+	function onHashChange() {
+		const hash = window.location.hash.replace(/^#/, '');
+		if (hash === '' || hash === 'global') {
+			selected = 'global';
+		} else if (channels.some((c) => c.id === hash)) {
+			selected = hash;
+		}
+	}
+
+	onDestroy(() => {
+		ws?.close();
+		ws = null;
+		if (typeof window !== 'undefined') {
+			window.removeEventListener('hashchange', onHashChange);
+		}
 	});
 
 	function channelName(id: string): string {
@@ -124,66 +351,163 @@
 		{#if loadError}
 			<p class="error">{loadError}</p>
 		{/if}
+		{#if saveError}
+			<p class="error">{saveError}</p>
+		{/if}
 
 		{#if selected === 'global'}
 			<h1>Global settings</h1>
 			<p class="note">
 				These values are the default for every channel. Per-channel overrides win when set.
-				Editing lands in the next PR; this view is read-only.
 			</p>
-			{#if global}
-				<dl>
-					<dt>Initial-load KB budget</dt>
-					<dd>{global.kbBudgetDefault} KB</dd>
+			{#if editGlobal && global}
+				<form
+					onsubmit={(e) => {
+						e.preventDefault();
+						saveGlobal();
+					}}
+				>
+					<div class="field">
+						<label for="kb-budget">Initial-load KB budget</label>
+						<input
+							id="kb-budget"
+							type="number"
+							min="1"
+							max="100000"
+							step="1"
+							bind:value={editGlobal.kbBudgetDefault}
+						/>
+						<span class="unit">KB</span>
+					</div>
 
-					<dt>Show groomed messages by default</dt>
-					<dd>{global.showGroomedDefault ? 'yes' : 'no'}</dd>
+					<div class="field">
+						<label for="show-groomed">Show groomed messages by default</label>
+						<input
+							id="show-groomed"
+							type="checkbox"
+							bind:checked={editGlobal.showGroomedDefault}
+						/>
+					</div>
 
-					<dt>Hide system messages by default</dt>
-					<dd>{global.hideSystemMessagesDefault ? 'yes' : 'no'}</dd>
+					<div class="field">
+						<label for="hide-system">Hide system messages by default</label>
+						<input
+							id="hide-system"
+							type="checkbox"
+							bind:checked={editGlobal.hideSystemMessagesDefault}
+						/>
+					</div>
 
-					<dt>Default channel on open</dt>
-					<dd>
-						{global.defaultChannelId
-							? channelName(global.defaultChannelId)
-							: '— (last-active)'}
-					</dd>
+					<div class="field">
+						<label for="default-channel">Default channel on open</label>
+						<select
+							id="default-channel"
+							value={editGlobal.defaultChannelId ?? ''}
+							onchange={(e) => {
+								const v = (e.target as HTMLSelectElement).value;
+								editGlobal!.defaultChannelId = v === '' ? null : v;
+							}}
+						>
+							<option value="">— (last-active)</option>
+							{#each channels as ch (ch.id)}
+								<option value={ch.id}>{ch.name}</option>
+							{/each}
+						</select>
+					</div>
 
-					<dt>Theme</dt>
-					<dd>{global.theme}</dd>
-				</dl>
+					<div class="field">
+						<label for="theme">Theme</label>
+						<select id="theme" bind:value={editGlobal.theme}>
+							<option value="system">system</option>
+							<option value="light">light</option>
+							<option value="dark">dark</option>
+						</select>
+						<span class="hint">
+							(stored now; actual dark-mode stylesheet lands in a future PR)
+						</span>
+					</div>
+
+					<div class="actions">
+						<button type="submit" disabled={!dirtyGlobal() || savingGlobal}>
+							{savingGlobal ? 'Saving…' : 'Save'}
+						</button>
+						<button
+							type="button"
+							class="secondary"
+							onclick={discardGlobal}
+							disabled={!dirtyGlobal() || savingGlobal}
+						>
+							Discard
+						</button>
+					</div>
+				</form>
 			{:else if !loadError}
 				<p>Loading…</p>
 			{/if}
 		{:else}
 			<h1>Channel: {channelName(selected)}</h1>
 			<p class="note">
-				Per-channel overrides for <strong>{channelName(selected)}</strong>. Empty values
-				inherit the global default.
+				Per-channel overrides for <strong>{channelName(selected)}</strong>. Empty values inherit
+				the global default.
 			</p>
-			{#if channelDetail && global}
-				<dl>
-					<dt>KB budget</dt>
-					<dd>
-						{#if channelDetail.kbBudgetOverride !== null}
-							{channelDetail.kbBudgetOverride} KB
-							<span class="annotation"
-								>(override — global is {global.kbBudgetDefault} KB)</span
-							>
-						{:else}
-							{global.kbBudgetDefault} KB
-							<span class="annotation">(inherited from global)</span>
-						{/if}
-					</dd>
+			{#if editChannel && channelDetail && global}
+				<form
+					onsubmit={(e) => {
+						e.preventDefault();
+						saveChannel();
+					}}
+				>
+					<div class="field">
+						<label for="kb-budget-ov">KB budget override</label>
+						<input
+							id="kb-budget-ov"
+							type="number"
+							min="1"
+							max="100000"
+							step="1"
+							placeholder={`inherit (${global.kbBudgetDefault})`}
+							bind:value={editChannelBudgetText}
+						/>
+						<span class="unit">KB</span>
+						<span class="hint">Empty = inherit global ({global.kbBudgetDefault} KB).</span>
+					</div>
 
-					<dt>Auto-approve agent-to-agent mentions</dt>
-					<dd>
-						{channelDetail.autoApprove ? 'yes' : 'no'}
-						<span class="annotation"
-							>(per-channel only — global default is "no")</span
+					<div class="field">
+						<label for="auto-approve">Auto-approve agent-to-agent mentions</label>
+						<input
+							id="auto-approve"
+							type="checkbox"
+							bind:checked={editChannel.autoApprove}
+						/>
+						<span class="hint">
+							When enabled, mentions from one agent to another in this channel
+							skip the approval queue. UI for the audit log lands with the
+							ADR-0015 PR stack.
+						</span>
+					</div>
+
+					<div class="actions">
+						<button type="submit" disabled={!dirtyChannel() || savingChannel}>
+							{savingChannel ? 'Saving…' : 'Save'}
+						</button>
+						<button
+							type="button"
+							class="secondary"
+							onclick={discardChannel}
+							disabled={!dirtyChannel() || savingChannel}
 						>
-					</dd>
-				</dl>
+							Discard
+						</button>
+						<button
+							type="button"
+							class="danger"
+							onclick={resetChannelToGlobal}
+							disabled={savingChannel}
+						>
+							Reset to global
+						</button>
+					</div>
+				</form>
 			{:else if !loadError}
 				<p>Loading…</p>
 			{/if}
@@ -262,6 +586,7 @@
 
 	.pane {
 		padding: 24px 32px;
+		max-width: 720px;
 	}
 
 	.pane h1 {
@@ -274,26 +599,89 @@
 		max-width: 60ch;
 	}
 
-	dl {
-		display: grid;
-		grid-template-columns: max-content 1fr;
-		gap: 8px 24px;
+	form {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
 		margin-top: 24px;
 	}
 
-	dt {
+	.field {
+		display: grid;
+		grid-template-columns: 240px max-content max-content;
+		align-items: center;
+		gap: 8px 12px;
+	}
+
+	.field label {
 		font-weight: 600;
 		color: #333;
 	}
 
-	dd {
-		margin: 0;
+	.field input[type='number'] {
+		width: 120px;
+		padding: 4px 6px;
 	}
 
-	.annotation {
-		margin-left: 8px;
-		font-size: 0.85rem;
+	.field select {
+		padding: 4px 6px;
+		min-width: 180px;
+	}
+
+	.field .unit {
+		color: #666;
+	}
+
+	.field .hint {
+		grid-column: 2 / -1;
 		color: #888;
+		font-size: 0.8rem;
+		margin-top: 2px;
+	}
+
+	.actions {
+		display: flex;
+		gap: 8px;
+		margin-top: 12px;
+	}
+
+	.actions button {
+		padding: 6px 14px;
+		font: inherit;
+		cursor: pointer;
+		border: 1px solid #888;
+		background: #2563eb;
+		color: white;
+		border-radius: 4px;
+	}
+
+	.actions button:hover:not(:disabled) {
+		background: #1d4ed8;
+	}
+
+	.actions button:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.actions button.secondary {
+		background: white;
+		color: #333;
+	}
+
+	.actions button.secondary:hover:not(:disabled) {
+		background: #f5f5f5;
+	}
+
+	.actions button.danger {
+		background: white;
+		color: #b00020;
+		border-color: #b00020;
+		margin-left: auto;
+	}
+
+	.actions button.danger:hover:not(:disabled) {
+		background: #fdecea;
 	}
 
 	.error {
