@@ -29,6 +29,13 @@
       "when": 1778509252151,
       "tag": "0003_icy_the_professor",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1778516094424,
+      "tag": "0004_slippery_warlock",
+      "breakpoints": true
     }
   ]
 }

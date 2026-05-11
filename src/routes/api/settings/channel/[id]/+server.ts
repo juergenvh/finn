@@ -25,7 +25,8 @@ import type { RequestHandler } from './$types';
 const UpdateChannelSchema = z
 	.object({
 		kbBudgetOverride: z.number().int().min(1).max(100_000).nullable().optional(),
-		autoApprove: z.boolean().optional()
+		autoApprove: z.boolean().optional(),
+		roundtripCapOverride: z.number().int().min(1).max(100).nullable().optional()
 	})
 	.strict();
 
@@ -72,7 +73,8 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		return json({
 			channelId,
 			kbBudgetOverride: existing?.kbBudgetOverride ?? null,
-			autoApprove: existing?.autoApprove ?? false
+			autoApprove: existing?.autoApprove ?? false,
+			roundtripCapOverride: existing?.roundtripCapOverride ?? null
 		});
 	}
 
@@ -87,6 +89,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 				channelId,
 				kbBudgetOverride: body.kbBudgetOverride ?? null,
 				autoApprove: body.autoApprove ?? false,
+				roundtripCapOverride: body.roundtripCapOverride ?? null,
 				updatedAt: now
 			})
 			.run();
@@ -108,7 +111,8 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 	return json({
 		channelId,
 		kbBudgetOverride: after?.kbBudgetOverride ?? null,
-		autoApprove: after?.autoApprove ?? false
+		autoApprove: after?.autoApprove ?? false,
+		roundtripCapOverride: after?.roundtripCapOverride ?? null
 	});
 };
 

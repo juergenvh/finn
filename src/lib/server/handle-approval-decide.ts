@@ -34,6 +34,7 @@ import {
 import { recordAgentMessage } from './messages.ts';
 import { streamToAgent } from './connectors/registry.ts';
 import { resolveMentionedAgents } from './mentions.ts';
+import { tryConsumeRoundtrip } from './loop-defence.ts';
 import type { Emit } from './ws/attach.ts';
 
 export type ApprovalDecideArgs = {
@@ -80,8 +81,36 @@ export async function handleApprovalDecide(args: ApprovalDecideArgs, emit: Emit)
 	// failing relay does not abort the others. The outer try/catch
 	// only guards against synchronous errors before the stream
 	// kicks off (e.g. an unknown agent id slipping through).
+	// Roundtrip-cap gate (ADR-0020). Each target counts as one
+	// agent-to-agent hop. We consume one slot per target up front;
+	// on cap-hit the remaining targets are dropped and a single
+	// system message tells the user. The pre-consumption shape is
+	// deliberate: we'd rather have a deterministic "these N targets
+	// dispatched, the rest were capped" outcome than have the cap
+	// trip mid-stream where some targets already raced through.
+	const dispatchTargets: string[] = [];
+	let capHit: { used: number; cap: number } | null = null;
+	for (const t of targets) {
+		const gate = tryConsumeRoundtrip(original.channelId);
+		if (!gate.allowed) {
+			capHit = { used: gate.used, cap: gate.cap };
+			break;
+		}
+		dispatchTargets.push(t);
+	}
+	if (capHit) {
+		const skipped = targets.length - dispatchTargets.length;
+		emit({
+			type: 'system',
+			body:
+				`Roundtrip cap of ${capHit.cap} reached for this channel — ` +
+				`${skipped} relay${skipped === 1 ? '' : 's'} skipped. ` +
+				`The next user message resets the counter.`
+		});
+	}
+
 	const outcomes = await Promise.all(
-		targets.map(async (targetAgentId) => {
+		dispatchTargets.map(async (targetAgentId) => {
 			try {
 				return await streamToAgent(
 					{
