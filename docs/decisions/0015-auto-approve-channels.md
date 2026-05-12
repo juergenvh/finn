@@ -297,15 +297,27 @@ are the other two.
 ## Persistence
 
 - New column `agents.role_label TEXT NULLABLE` (§2-3).
-- New column `channels.auto_approve INTEGER NOT NULL DEFAULT 0`
-  (boolean flag; SQLite stores as 0/1).
-- Optional new column `approvals.created_via TEXT` carrying
-  one of `'mention'` / `'forward'` / `'auto_approve'`. NULL
-  for pre-feature rows; the protocol viewer renders missing
-  values as "mention" since that's what existed at the time.
-  *Decide during implementation: do we need this column, or
-  does the absence of `decidedAt = createdAt` already encode
-  enough? Either way is acceptable; this ADR does not pin it.*
+- New column `settings_channel.auto_approve INTEGER NOT NULL
+  DEFAULT 0` (boolean flag; SQLite stores as 0/1). *Shipped
+  as part of ADR-0019 (migration `0004_slippery_warlock.sql`),
+  ahead of the routing path that reads it.* The original ADR
+  text said `channels.auto_approve`; ADR-0019 settled per-channel
+  override storage on the `settings_channel` table, so this is
+  where the flag lives. Precedence: channel override only —
+  there is no global default for this key (§1 boundary: every
+  auto-approve activation is an explicit, per-channel opt-in).
+- New column `approvals.created_via TEXT` carrying one of
+  `'mention'` / `'forward'` / `'auto_approve'`. NULL for
+  pre-feature rows; readers default missing values to
+  `'mention'`. *Decision during implementation: yes, ship it.*
+  Migration `0005_third_marvel_apes.sql`. The protocol viewer
+  PR can rely on the column being present and only needs the
+  NULL-→-`mention` fallback for backfill.
+- New module `src/lib/server/channel-settings.ts` with
+  `readAutoApprove(channelId)` for server-internal hot-path
+  reads (the HTTP `/api/settings` handler keeps its own
+  duplicated read path; sharing was rejected to avoid a
+  fetch-from-localhost detour in the dispatch path).
 
 ## Wire protocol additions
 
@@ -342,6 +354,16 @@ Recommended split into three PRs, landable in order:
 3. **Auto-approve toggle + audit modal + routing path.** The
    feature itself. Lands last because it depends on (1) for
    the audit and (2) for the safety net.
+
+   *Shipped in two PRs: the toggle UI + storage in PR #72
+   (ADR-0019 phase 2 — the column piggybacked on the settings
+   surface PR rather than waiting). The routing path landed
+   separately as feat/auto-approve-routing on top of
+   ADR-0020's loop defence. The audit modal (pre-activation
+   warnings + role-label table) is still TBD; the toggle
+   today is a plain checkbox with a text hint, and the
+   role-label plumbing of phase 1 has not yet shipped — those
+   two pieces are the remaining work.*
 
 If Jürgen prefers to ship (1) ahead of accepting the rest of
 this ADR (because role labels are useful even without
