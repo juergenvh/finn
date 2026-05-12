@@ -459,3 +459,109 @@ session. Three vermutung-instead-of-verifizieren misses in 20
 minutes around 22:00 on a Sunday is a signal, not just a fact. The
 honest move at that point is to slow down or stop, not to keep
 pushing.
+
+## 12. Curl-acceptance ceiling for browser bind layers — 2026-05-11
+
+Five PRs shipped on 2026-05-11 (#71, #72, #73, #76, #77) for the
+ADR-0019 settings surface. All five passed `npm run check` (0/0) and
+all five had explicit curl-acceptance steps in the PR body that
+verified the server contract end-to-end. Both gates were green for
+the whole stack.
+
+Two bugs shipped anyway, both in the global-settings form:
+
+- **#77** Save button stayed disabled forever — the `$derived` dirty
+  check captured a stale snapshot because the dependency tracking
+  ran once at render and never re-fired on edit.
+- **#79** Save enabled, PATCH rejected with `400` — the
+  `<input type="number">` `bind:value` shape returned a string in
+  some Svelte 5 bind paths, the zod-strict server schema rejected
+  it, the UI showed no feedback because the failure was swallowed
+  in `console.error`.
+
+Both would have been caught by 30 seconds of clicking through the
+form in a real browser.
+
+**Symptom.** Persistent form-state bugs that survive multiple PRs,
+each time the next PR "looks unrelated" until the user pokes at
+the UI and finds the previous fix didn't actually fix anything.
+
+**Root cause.** Curl tests the server contract. `svelte-check`
+tests types. **Neither tests the bind layer** between DOM input
+and `$state` — the part of the stack where Svelte 5's reactivity
+rules, the `<input>` element's value-binding semantics, and the
+application's commit-on-Save flow have to agree. A 200-line
+form-handler can pass curl + check and still be visibly broken.
+
+**Fix.** PR #82 added a Playwright smoke harness with two specs
+that would have caught both bugs (Save persists across reload,
+Discard reverts edit). The pre-merge rule in
+`docs/contributing.md` requires `npm run test:smoke` for any PR
+that touches a `+page.svelte`, a form handler, or a Svelte
+`bind:`. Server-only and docs-only PRs stay exempt — the rule
+scales with what the PR actually changes.
+
+**Meta.** The earlier curl-then-ship discipline (lesson #6,
+smoke-curl the wire before opening a PR) is *right* for backend
+integration with third-party endpoints. It is *insufficient*
+the moment the user-visible surface is a browser form. The two
+rules now sit side by side: server contract → curl. Browser bind
+layer → smoke spec. Type-check is necessary for both and
+sufficient for neither.
+
+## 13. PR-stacks force manual conflict resolution on the merger — 2026-05-12
+
+Three PRs in one morning. #82 (smoke harness) merged cleanly. #83
+(auto-approve routing) merged cleanly. Then I opened **#84**
+(latency fix for issue #81) on top of `feat/auto-approve-routing`
+*while #83 was still in review*, because the latency fix
+refactored code that #83 had just introduced.
+
+When Jürgen went to merge #84, the squash-merge of #83 had
+rewritten the file layout enough that #84's diff no longer
+applied cleanly. The conflict resolution was non-obvious
+("do I take the structural change from #84 here, or the
+different structural change from #83 there, or some merge of
+the two?"). Jürgen: "jetzt muss ich manuell konflikte resolven
+bei denen nicht 100% klar ist was ich übernehmen soll. das
+unterlassen wir künftig bitte."
+
+**Symptom.** Squash-merged PR-stacks where the second PR's diff
+becomes unintelligible after the first one lands, forcing the
+merging human into a code-archaeology session to figure out the
+intended final state.
+
+**Root cause.** Two separate failures compounded:
+
+1. I treated my own session productivity (keep coding while review
+   happens) as more important than the merger's experience.
+   Stack-PRs *can* work, but only when the second PR is a strict
+   addition to the first — not a refactor of the same lines.
+2. The latency-fix PR was over-scoped: 247/190 LOC across 3 files
+   for what was conceptually a per-target-promise reordering. A
+   minimal-diff version would have been small enough that even a
+   stack would have rebased trivially.
+
+**Fix.** Closed #84, deleted the branch, waited for #83 to merge
+(took Jürgen ~5 minutes), rebased onto fresh main, opened **#85**
+with **+82/-57 lines across 2 files** — same effect, same
+benchmark numbers, much smaller review surface. #85 merged
+immediately. Net cost: one closed PR, one re-open, ~10 minutes.
+
+**Rule going forward.** One open PR-stack at a time. New work
+waits until the current PR is merged, unless the new work
+strictly doesn't touch the in-flight files. Docs-only PRs are
+almost always safe; anything in the same module as the active
+PR is not.
+
+**Meta.** This sits next to lesson #11 (PR state not verified
+before push): both are failures to treat the merger as a real
+stakeholder with a real workload, not just a code-review rubber
+stamp. The minimal-diff principle is the other half of the
+coin: when the conceptual change is small, the implementation
+should be too. Refactoring the surrounding code is a separate
+PR, opened consciously, not sneaked into the bug-fix.
+
+First question on every bug fix going forward: **"what is the
+smallest change that fixes this?"** Refactor only as a separate,
+conscious next PR, with the bug-fix shipped first.
