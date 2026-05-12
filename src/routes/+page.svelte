@@ -728,6 +728,9 @@
 		ws.send(JSON.stringify({ type: 'user_message', channel_id: activeChannelId, body }));
 		draft = '';
 		mentionCtx = null;
+		// After clearing draft, shrink the textarea back to its base
+		// height instead of staying expanded from the previous message.
+		queueMicrotask(autosizeComposer);
 	}
 
 	async function setMessageHidden(messageId: string, hidden: boolean) {
@@ -814,6 +817,24 @@
 
 	function onComposerInput() {
 		detectMentionAtCaret();
+		autosizeComposer();
+	}
+
+	// Issue #89: grow the composer textarea with its content up to a
+	// sensible cap, then scroll inside the box. Pure DOM manipulation
+	// is fine here because there is exactly one composer per page and
+	// the resize must happen synchronously with the input event to
+	// avoid a one-frame layout flicker.
+	const COMPOSER_MAX_HEIGHT_PX = 220; // ~10 rows at our font size.
+	function autosizeComposer() {
+		if (!composer) return;
+		composer.style.height = 'auto';
+		const next = Math.min(composer.scrollHeight, COMPOSER_MAX_HEIGHT_PX);
+		composer.style.height = `${next}px`;
+		// Once we hit the cap, the textarea's own scroll takes over;
+		// the height stays put and the user scrolls inside the box.
+		composer.style.overflowY =
+			composer.scrollHeight > COMPOSER_MAX_HEIGHT_PX ? 'auto' : 'hidden';
 	}
 
 	/* ---------- channel + agent CRUD ---------- */
@@ -1667,14 +1688,25 @@
 	textarea {
 		width: 100%;
 		box-sizing: border-box;
-		background: #16161a;
+		/* Subtle distinct background so the input region reads as
+		 * its own surface against the chat scroll (#1c1c22 sits one
+		 * shade lighter than #16161a). Issue #89. */
+		background: #1c1c22;
 		border: 1px solid #2a2a30;
 		color: #e8e8ea;
 		padding: 0.5rem;
 		font-family: inherit;
 		font-size: 0.95rem;
 		border-radius: 4px;
-		resize: vertical;
+		/* Resize is driven by autosizeComposer() in JS up to the cap.
+		 * Disable the manual resize handle to avoid the two interfering. */
+		resize: none;
+		min-height: 2.5rem;
+		overflow-y: hidden;
+	}
+	textarea:focus {
+		outline: none;
+		border-color: #475569;
 	}
 	footer button {
 		background: #2a2a30;
