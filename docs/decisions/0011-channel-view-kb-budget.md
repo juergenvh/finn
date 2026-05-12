@@ -45,8 +45,8 @@ history is a deliberate user action).
 
 | Unit          | Failure mode |
 | ------------- | ------------ |
-| Last N rows   | One short reply ≠ one 5 KB code dump. \"Last 200\" can be 4 KB or 400 KB. |
-| Last N hours  | A quiet day ≠ a noisy hour. \"Last 24h\" can be 0 messages or 50 MB. |
+| Last N rows   | One short reply ≠ one 5 KB code dump. "Last 200" can be 4 KB or 400 KB. |
+| Last N hours  | A quiet day ≠ a noisy hour. "Last 24h" can be 0 messages or 50 MB. |
 | Last N bytes  | Tracks how much the eye actually scans on open. Stable across channel patterns. |
 
 Bytes is the unit that survives both ends of the spectrum.
