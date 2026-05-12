@@ -71,6 +71,52 @@ Authored as Dixie, with `Co-authored-by: Jürgen <…>` for
 real collaborations. Survives squash because it lives in the
 PR body.
 
+## Pre-merge verification
+
+The lessons in `docs/lessons.md` (curl-acceptance, 2026-05-11)
+document why `npm run check` + curl alone are *not* enough for
+changes that touch the browser. The pre-merge checks below scale
+with what the PR actually changes.
+
+### Always
+
+```bash
+npm run check    # svelte-check + sync; catches type and prop-shape regressions
+```
+
+### If the PR touches a `+page.svelte`, a `+page.server.ts` form
+handler, or any `bind:` in a Svelte component
+
+Run the browser smoke suite:
+
+```bash
+npm run test:smoke
+```
+
+First time only (one-off ~280 MB download for the Chromium
+binary into `~/.cache/ms-playwright/`):
+
+```bash
+npm run test:smoke:install
+```
+
+The smoke suite lives under `tests/smoke/` and uses Playwright
+against a locally-booted dev server (Playwright starts/stops it
+automatically via `playwright.config.ts`'s `webServer` block; if
+you already have `npm run dev` running it reuses port 5173).
+
+If the smoke suite doesn't yet cover the form you changed, add a
+spec to `tests/smoke/` before opening the PR. The bar is low —
+one `goto → edit → save → reload → assert` per affected form is
+enough.
+
+### If curl + `npm run check` are sufficient (server-only, docs,
+ADRs, repo config)
+
+Say so explicitly in the `How verified` section. Future-you
+reviewing the PR will appreciate knowing the browser-test
+intentionally wasn't run.
+
 ## Reviewing
 
 For now, reviews are Jürgen's responsibility. The expected
