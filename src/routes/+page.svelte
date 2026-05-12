@@ -152,6 +152,31 @@
 		| { kind: 'edit_agent'; agentId: string };
 	let modal = $state<ModalState>({ kind: 'none' });
 	let openMenu = $state<string | null>(null);
+
+	// Issue #90: collapsible sidebar sections. Persist the
+	// collapsed state per section in localStorage so the user
+	// keeps their preference across reloads. Default: both
+	// expanded.
+	function readCollapsed(key: string): boolean {
+		if (typeof localStorage === 'undefined') return false;
+		return localStorage.getItem(`finn.sidebar.collapsed.${key}`) === '1';
+	}
+	function writeCollapsed(key: string, v: boolean) {
+		if (typeof localStorage === 'undefined') return;
+		if (v) localStorage.setItem(`finn.sidebar.collapsed.${key}`, '1');
+		else localStorage.removeItem(`finn.sidebar.collapsed.${key}`);
+	}
+	let channelsCollapsed = $state(false);
+	let agentsCollapsed = $state(false);
+	function toggleSection(which: 'channels' | 'agents') {
+		if (which === 'channels') {
+			channelsCollapsed = !channelsCollapsed;
+			writeCollapsed('channels', channelsCollapsed);
+		} else {
+			agentsCollapsed = !agentsCollapsed;
+			writeCollapsed('agents', agentsCollapsed);
+		}
+	}
 	let editAgentData = $state<{
 		id: string;
 		name: string;
@@ -1046,6 +1071,9 @@
 	}
 
 	onMount(() => {
+		// Restore collapsed sidebar sections from localStorage (#90).
+		channelsCollapsed = readCollapsed('channels');
+		agentsCollapsed = readCollapsed('agents');
 		bootstrap();
 	});
 
@@ -1071,13 +1099,30 @@
 			</div>
 		</div>
 
-		<a class="nav-link" href="/protocol">☰ Protocol viewer</a>
+		<!-- Protocol viewer: styled as a sidebar nav row matching the
+			 channel/agent rows for visual consistency (#90 item 3). -->
+		<div class="section nav-section">
+			<a class="nav-row" href="/protocol">
+				<span class="nav-icon">☰</span>
+				<span>Protocol viewer</span>
+			</a>
+		</div>
 
 		<div class="section">
 			<div class="section-header">
-				<span class="section-title">channels</span>
+				<button
+					class="section-title-btn"
+					type="button"
+					aria-expanded={!channelsCollapsed}
+					title={channelsCollapsed ? 'expand channels' : 'collapse channels'}
+					onclick={() => toggleSection('channels')}
+				>
+					<span class="caret">{channelsCollapsed ? '▸' : '▾'}</span>
+					<span class="section-title">channels</span>
+				</button>
 				<button class="add-btn" title="add channel" onclick={() => (modal = { kind: 'create_channel' })}>+</button>
 			</div>
+			{#if !channelsCollapsed}
 			{#each channels as c (c.id)}
 				<div class="row-wrapper">
 					<button
@@ -1096,13 +1141,24 @@
 					{/if}
 				</div>
 			{/each}
+			{/if}
 		</div>
 
 		<div class="section">
 			<div class="section-header">
-				<span class="section-title">agents</span>
+				<button
+					class="section-title-btn"
+					type="button"
+					aria-expanded={!agentsCollapsed}
+					title={agentsCollapsed ? 'expand agents' : 'collapse agents'}
+					onclick={() => toggleSection('agents')}
+				>
+					<span class="caret">{agentsCollapsed ? '▸' : '▾'}</span>
+					<span class="section-title">agents</span>
+				</button>
 				<button class="add-btn" title="add agent" onclick={() => (modal = { kind: 'create_agent' })}>+</button>
 			</div>
+			{#if !agentsCollapsed}
 			{#each allAgents as a (a.id)}
 				<div class="row-wrapper">
 					<div class="member-row">
@@ -1124,6 +1180,7 @@
 					{/if}
 				</div>
 			{/each}
+			{/if}
 		</div>
 
 		{#if activeChannelId && activeMembers.length > 0}
@@ -1154,7 +1211,7 @@
 				</label>
 				<label class="filter-row">
 					<input type="checkbox" bind:checked={showGroomed} />
-					<span class="filter-name">show groomed (hidden) messages</span>
+					<span class="filter-name">show groomed messages</span>
 				</label>
 			</div>
 		{/if}
@@ -1165,7 +1222,7 @@
 			{#if activeChannel}
 				<div class="channel-header-row">
 					<div>
-						<div class="channel-name">#{activeChannel.name}</div>
+						<h1 class="channel-name">#{activeChannel.name}</h1>
 						{#if activeChannel.description}
 							<div class="channel-desc">{activeChannel.description}</div>
 						{/if}
@@ -1195,7 +1252,7 @@
 					</div>
 				</div>
 			{:else}
-				<div class="channel-name muted">no channel selected</div>
+				<h1 class="channel-name muted">no channel selected</h1>
 			{/if}
 		</header>
 
@@ -1380,19 +1437,30 @@
 	.status.on {
 		color: #6ee7b7;
 	}
-	.nav-link {
-		display: block;
-		color: #94a3b8;
+	/* Protocol-viewer nav row: matches the .channel-row visual
+	 * weight so the sidebar reads as one consistent list of
+	 * navigable items (#90 item 3). */
+	.nav-section {
+		margin-top: 0;
+		margin-bottom: 0.25rem;
+	}
+	.nav-row {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		color: #cbd5e1;
 		text-decoration: none;
 		padding: 0.4rem 0.5rem;
 		border-radius: 4px;
-		font-size: 0.9rem;
-		margin-bottom: 0.5rem;
+		font-size: 0.95rem;
 		transition: background 120ms;
 	}
-	.nav-link:hover {
+	.nav-row:hover {
 		background: #1f1f24;
 		color: #e8e8ea;
+	}
+	.nav-icon {
+		color: #666;
 	}
 
 	.section {
@@ -1412,6 +1480,30 @@
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
 		font-size: 0.7rem;
+	}
+	/* Section title rendered as a button so the header is the
+	 * collapse-toggle affordance (#90 item 2). Caret shows the
+	 * current state. */
+	.section-title-btn {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		background: transparent;
+		border: 0;
+		padding: 0.1rem 0.15rem;
+		border-radius: 3px;
+		cursor: pointer;
+		font: inherit;
+		color: inherit;
+	}
+	.section-title-btn:hover {
+		background: #1f1f24;
+	}
+	.caret {
+		color: #555;
+		font-size: 0.65rem;
+		width: 0.7rem;
+		display: inline-block;
 	}
 	.add-btn {
 		background: transparent;
@@ -1575,7 +1667,11 @@
 		gap: 1rem;
 	}
 	.channel-name {
-		font-size: 1rem;
+		/* h1 sized to match settings page's <h1> visual weight
+		 * (#90 item 4): symmetric header treatment across the two
+		 * surfaces. */
+		margin: 0;
+		font-size: 1.1rem;
 		font-weight: 600;
 	}
 	.channel-name.muted {
