@@ -1006,6 +1006,97 @@
 		openMenu = null;
 	}
 
+	// Issue (UI quick-goodie 2026-05-12): save / load an agent's
+	// configuration as a JSON file. Save downloads the agent's
+	// portable fields (name, connectorType, config) wrapped in a
+	// versioned envelope. Load reads such a file and POSTs a new
+	// agent via the existing /api/agents endpoint, so the regular
+	// server-side validation + name-clash handling apply.
+	//
+	// No secrets in scope: connector configs reference tokens via
+	// env-var names (token_env_var), never carry the token itself.
+
+	const AGENT_EXPORT_SCHEMA = 'finn-agent-export-v1';
+
+	async function saveAgentToFile(agentId: string) {
+		openMenu = null;
+		try {
+			const res = await fetch(`/api/agents/${agentId}`);
+			if (!res.ok) {
+				alert(`failed to read agent: ${res.status}`);
+				return;
+			}
+			const row = await res.json();
+			const envelope = {
+				schema: AGENT_EXPORT_SCHEMA,
+				exportedAt: new Date().toISOString(),
+				agent: {
+					name: row.name,
+					connectorType: row.connectorType,
+					config: row.config
+				}
+			};
+			const json = JSON.stringify(envelope, null, 2);
+			const blob = new Blob([json], { type: 'application/json' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `finn-agent-${row.name}.json`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+		} catch (err) {
+			alert(`save failed: ${(err as Error).message}`);
+		}
+	}
+
+	let loadAgentInput: HTMLInputElement | null = $state(null);
+
+	function triggerLoadAgent() {
+		loadAgentInput?.click();
+	}
+
+	async function onLoadAgentFile(ev: Event) {
+		const input = ev.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+		try {
+			const text = await file.text();
+			const parsed = JSON.parse(text);
+			if (parsed?.schema !== AGENT_EXPORT_SCHEMA) {
+				alert(`unrecognised file (schema=${parsed?.schema ?? 'missing'}); expected ${AGENT_EXPORT_SCHEMA}`);
+				return;
+			}
+			const a = parsed.agent;
+			if (!a?.name || !a?.connectorType || !a?.config) {
+				alert('file missing required fields (name, connectorType, config)');
+				return;
+			}
+			const res = await fetch('/api/agents', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					name: a.name,
+					config: a.config,
+					enabled: true
+				})
+			});
+			if (!res.ok) {
+				const msg = await res.text().catch(() => '');
+				alert(`load failed (${res.status}): ${msg.slice(0, 300)}`);
+				return;
+			}
+			// Success: the state_changed WS broadcast will refresh
+			// the agent list automatically. No further UI work here.
+		} catch (err) {
+			alert(`load failed: ${(err as Error).message}`);
+		} finally {
+			// Reset so the same file can be loaded again if needed.
+			input.value = '';
+		}
+	}
+
 	async function openEditAgent(agentId: string) {
 		const res = await fetch(`/api/agents/${agentId}`);
 		if (!res.ok) {
@@ -1185,7 +1276,21 @@
 					<span class="caret">{agentsCollapsed ? '▸' : '▾'}</span>
 					<span class="section-title">agents</span>
 				</button>
-				<button class="add-btn" title="add agent" onclick={() => (modal = { kind: 'create_agent' })}>+</button>
+				<div class="section-header-actions">
+					<button
+						class="add-btn"
+						title="load agent from file"
+						onclick={triggerLoadAgent}
+					>⇧</button>
+					<input
+						bind:this={loadAgentInput}
+						type="file"
+						accept="application/json,.json"
+						style="display:none"
+						onchange={onLoadAgentFile}
+					/>
+					<button class="add-btn" title="add agent" onclick={() => (modal = { kind: 'create_agent' })}>+</button>
+				</div>
 			</div>
 			{#if !agentsCollapsed}
 			{#each allAgents as a (a.id)}
@@ -1204,6 +1309,7 @@
 							<button onclick={() => toggleAgentEnabled(a)}>
 								{a.enabled ? 'Disable' : 'Enable'}
 							</button>
+							<button onclick={() => saveAgentToFile(a.id)}>Save to file</button>
 							<button onclick={() => archiveAgent(a.id)}>Archive</button>
 						</div>
 					{/if}
@@ -1545,6 +1651,13 @@
 		border-radius: 4px;
 		cursor: pointer;
 		padding: 0;
+	}
+	/* Cluster of header-side action buttons (add + load). Keeps
+	 * the ↑ and + side-by-side instead of forcing one above the
+	 * other when the sidebar gets narrow. */
+	.section-header-actions {
+		display: flex;
+		gap: 0.25rem;
 	}
 	.add-btn:hover {
 		background: #1f1f24;
