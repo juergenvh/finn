@@ -39,6 +39,11 @@ Thumbs.db
 **/credentials*
 **/exports/
 
+# --- playwright ---
+test-results/
+playwright-report/
+playwright/.cache/
+
 # --- runtime / logs ---
 *.log
 .pnpm-debug.log*
