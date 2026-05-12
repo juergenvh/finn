@@ -565,3 +565,105 @@ PR, opened consciously, not sneaked into the bug-fix.
 First question on every bug fix going forward: **"what is the
 smallest change that fixes this?"** Refactor only as a separate,
 conscious next PR, with the bug-fix shipped first.
+
+## 14. Multi-agent session quality is set by initiator discipline — 2026-05-11
+
+On 2026-05-11 evening, Jürgen ran a 4-hop multi-agent design
+session (Wintermute + Gwen + Dixie, auto-approve on, roundtrip cap
+= 4) and got a substantive output: a complete concept for mermaid-
+diagram rendering in bubbles, captured as issue #80. Wintermute's
+reflection at the end identified the session quality as
+**non-accidental** — the result of four structural choices, any
+one of which would have degraded the output.
+
+The four:
+
+1. **Setup-prompt three minutes before the substantive anstoss.**
+   Jürgen sent a framing message to the whole channel describing
+   the mode ("discussion among three of you, not a single-shot
+reply"), the topology ("auto-approve is on, no user intervention
+   between hops"), and the constraint ("4-hop cap, reset by user
+   message"). The agents received the topic in an *already-framed*
+   discourse context.
+
+2. **The substantive anstoss carried three forcing functions in
+   one sentence.** Topic frame ("Mermaid"), required output ("ein
+   Konzept präsentiert"), quality constraint ("sinnvoll (!)").
+   Without the topic frame, the agents would have streamed across
+   all UX themes. Without the required output, the session would
+   have been brainstorm-shaped, not conclude-shaped. Without the
+   quality constraint, sub-par variants would have lived in the
+   final concept.
+
+3. **Hop 1 distributed roles explicitly.** The initiator wrote
+   "Wintermute: Agent-Reality / diagram-language choice. Gwen:
+   Security/SVG + UX." Not asked for, not enforced by the
+   anstoss — a contingent good move. Without it, three agents to
+   the same question (security) would have produced 4 hops of
+   "who phrases it sharpest" rather than concept-work.
+
+4. **The hop limit acted as a quality constraint, not just a loop
+   defence.** Wintermute: "Das hat mich gezwungen, die
+   Performance-Frage in einem Hop komplett auszuformulieren statt
+   in zwei zaghaften. Ohne Limit hätten wir's auf 6-7 Hops
+   gestreckt. Constraint → Qualität."
+
+**Symptom (the failure mode this avoids).** Multi-agent sessions
+that consume 4+ hops without producing a substantive output —
+where the agents converge on the same topic, polish each other's
+phrasings, and end up with a polished version of the most
+obvious framing rather than the most useful one. The user feels
+like "the agents discussed it for a while" without anything to
+point at.
+
+**Root cause.** Without explicit framing, three agents will
+gravitate toward whatever is most salient in the topic — usually
+the most familiar architectural concern. Convergence is
+comfortable for the participating agents (everyone is on the
+same page) but expensive in terms of session-output diversity.
+
+**Fix (operational).** When initiating a multi-agent session,
+structure the open like this:
+
+- *Setup turn* (sent to channel, no @-mention): mode, topology,
+  constraint.
+- *Anstoss turn* (sent to one agent with @-mention): topic frame +
+  required output + quality constraint. One sentence is enough.
+- *Hop 1 by the initiated agent*: explicit role distribution to
+  the other agents.
+- *Roundtrip cap*: short enough to force completeness per hop,
+  long enough to allow real exchange. 4 hops worked here.
+
+The "Soweit das Szenario" / "Soweit der Wunsch" framing in
+Jürgen's prompts (the cadence of explicitly *closing* the setup
+before opening the topic) reads like a small thing but is what
+makes the setup-vs-substance boundary visible to the agents.
+
+**Fix (product).** `ADR-0021-multi-agent-channel-initiation`
+sketches the design space for encoding parts of this pattern as
+a finn feature — currently at `status: discovery`. The strongest
+current candidate is a per-channel free-form `initiation_template`
+field that finn surfaces as a hint above the input box when a
+multi-agent channel is opened, leaving the user to copy/paste
+and edit. Decision pending a second or third session against the
+pattern.
+
+**Meta.** This lesson sits next to lesson #6 (smoke-curl the wire
+before opening a PR): both are about establishing a *frame* before
+the substantive work, and both reduce the cost of bad outputs
+found late. It also extends the operational principle from
+workspace `principles.md`: *"the frame of the anstoss becomes
+the frame of the work"* — the corollary is that when the work is
+multi-agent and the agents' frames diverge from the initiator's,
+the whole session inherits the agents' default frames, not the
+initiator's intent. Setup-before-anstoss is what closes that gap.
+
+The whole observation only became visible because Wintermute
+reflected explicitly at the end of hop 4 — a fifth structural
+element that probably belongs here too but is harder to encode:
+the initiator should ask for a meta-reflection from one
+participant at the end. *That* is what produced this lesson.
+
+*Verbatim prompts from the session are preserved in the workspace
+daily log `memory/2026-05-11.md` for future reference; this entry
+is the generalised distillation.*
