@@ -29,10 +29,17 @@ export type ApprovalDecision =
  * Create a `pending` approval row for an agent message.
  * `defaultTargets` are the mention-resolved targets — they are the
  * UI's pre-fill, but the user can change them before deciding.
+ *
+ * `createdVia` defaults to `'mention'` because that is the only
+ * route that produces a *pending* row today: an agent reply
+ * mentions another agent and the user has to decide. Forward
+ * (`'forward'`) and auto-approve (`'auto_approve'`) skip pending
+ * entirely and use `createRoutedApproval`.
  */
 export function createPendingApproval(args: {
 	messageId: string;
 	defaultTargets: string[];
+	createdVia?: 'mention';
 }): Approval {
 	const db = getDb();
 	const row = {
@@ -42,7 +49,8 @@ export function createPendingApproval(args: {
 		targetedAgentIds: JSON.stringify(args.defaultTargets),
 		rejectReason: null,
 		createdAt: Date.now(),
-		decidedAt: null
+		decidedAt: null,
+		createdVia: args.createdVia ?? 'mention'
 	};
 	db.insert(approvals).values(row).run();
 	return row;
@@ -114,6 +122,7 @@ export function decideApproval(approvalId: string, decision: ApprovalDecision): 
 export function createRoutedApproval(args: {
 	messageId: string;
 	targets: string[];
+	createdVia?: 'forward' | 'auto_approve';
 }): Approval {
 	const db = getDb();
 	const now = Date.now();
@@ -124,7 +133,8 @@ export function createRoutedApproval(args: {
 		targetedAgentIds: JSON.stringify(args.targets),
 		rejectReason: null,
 		createdAt: now,
-		decidedAt: now
+		decidedAt: now,
+		createdVia: args.createdVia ?? 'forward'
 	};
 	db.insert(approvals).values(row).run();
 	return row;

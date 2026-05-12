@@ -1,0 +1,1 @@
+ALTER TABLE `approvals` ADD `created_via` text;

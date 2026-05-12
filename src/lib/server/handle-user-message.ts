@@ -24,9 +24,11 @@
 
 import type { Emit, BroadcastMessage } from './ws/attach.ts';
 import { recordUserMessage, recordAgentMessage } from './messages.ts';
-import { streamUserMessage } from './connectors/registry.ts';
+import { streamUserMessage, streamToAgent } from './connectors/registry.ts';
 import { resolveMentionedAgents } from './mentions.ts';
-import { createPendingApproval, targetsOf } from './approvals.ts';
+import { createPendingApproval, createRoutedApproval, targetsOf } from './approvals.ts';
+import { readAutoApprove } from './channel-settings.ts';
+import { tryConsumeRoundtrip } from './loop-defence.ts';
 
 function userMessageBroadcast(
 	row: { id: string; channelId: string; body: string; createdAt: number },
@@ -84,6 +86,13 @@ export async function handleUserMessage(
 		}
 	}
 
+	// Channels with `settings_channel.auto_approve = true` skip the
+	// human-in-the-loop gate for agent-to-agent mentions (ADR-0015).
+	// Read once per user-turn — changes mid-stream are not a thing
+	// we model, and refreshing the flag per reply would add a DB
+	// read into the hot path for no useful semantic.
+	const autoApprove = readAutoApprove(args.channel_id);
+
 	for (const reply of result.replies) {
 		if ('error' in reply) {
 			// `streamUserMessage` already emitted `message_error` for
@@ -112,7 +121,17 @@ export async function handleUserMessage(
 		const mentioned = resolveMentionedAgents(args.channel_id, reply.body).filter(
 			(id) => id !== reply.agentId
 		);
-		if (mentioned.length > 0) {
+		if (mentioned.length === 0) continue;
+
+		if (autoApprove) {
+			await dispatchAutoApprove({
+				channelId: args.channel_id,
+				messageId: agentRow.id,
+				body: reply.body,
+				targets: mentioned,
+				emit
+			});
+		} else {
 			const approval = createPendingApproval({
 				messageId: agentRow.id,
 				defaultTargets: mentioned
@@ -123,5 +142,133 @@ export async function handleUserMessage(
 				message_id: agentRow.id
 			});
 		}
+	}
+}
+
+/**
+ * Auto-approve dispatch path (ADR-0015 §6, wire protocol).
+ *
+ * Creates a `routed` approval row with `created_via='auto_approve'`,
+ * emits the corresponding `approval_created` event (status=`routed`
+ * from the start — no `pending` event is ever sent on this path),
+ * then fans out `streamToAgent` calls for the mentioned targets.
+ *
+ * Roundtrip-cap (ADR-0020) is consumed per target up front, mirroring
+ * the pre-consumption shape in `handle-approval-decide.ts`. A relayed
+ * reply may itself mention yet another agent; the recursion is
+ * bounded by (a) the roundtrip cap and (b) `tryConsumeRoundtrip`
+ * stopping new dispatches once the cap is hit.
+ *
+ * Errors in individual relays do not abort the others — `streamToAgent`
+ * converts mid-stream errors into an `{ error }` outcome shape, and
+ * sync errors are caught here.
+ */
+async function dispatchAutoApprove(args: {
+	channelId: string;
+	messageId: string;
+	body: string;
+	targets: string[];
+	emit: Emit;
+}): Promise<void> {
+	const { channelId, messageId, body, targets, emit } = args;
+
+	// Pre-consume roundtrip slots per target. The same shape as the
+	// approval-decide path: deterministic "these N dispatched, the rest
+	// were capped" rather than cap-trips mid-stream.
+	const dispatchTargets: string[] = [];
+	let capHit: { used: number; cap: number } | null = null;
+	for (const t of targets) {
+		const gate = tryConsumeRoundtrip(channelId);
+		if (!gate.allowed) {
+			capHit = { used: gate.used, cap: gate.cap };
+			break;
+		}
+		dispatchTargets.push(t);
+	}
+
+	// Audit row covers exactly what was actually dispatched. If the cap
+	// trips before any target lands, we still write the row so the
+	// protocol viewer shows the intent + a same-turn system event
+	// explains why no streams followed.
+	const approval = createRoutedApproval({
+		messageId,
+		targets: dispatchTargets,
+		createdVia: 'auto_approve'
+	});
+	emit({
+		type: 'approval_created',
+		approval: { ...approval, targets: targetsOf(approval) },
+		message_id: messageId
+	});
+
+	if (capHit) {
+		const skipped = targets.length - dispatchTargets.length;
+		emit({
+			type: 'system',
+			body:
+				`Roundtrip cap of ${capHit.cap} reached for this channel — ` +
+				`${skipped} relay${skipped === 1 ? '' : 's'} skipped. ` +
+				`The next user message resets the counter.`
+		});
+	}
+
+	if (dispatchTargets.length === 0) return;
+
+	const outcomes = await Promise.all(
+		dispatchTargets.map(async (targetAgentId) => {
+			try {
+				return await streamToAgent(
+					{ agent_id: targetAgentId, channel_id: channelId, body },
+					emit
+				);
+			} catch (err) {
+				return {
+					agentId: targetAgentId,
+					messageId: '',
+					error: (err as Error).message ?? String(err)
+				};
+			}
+		})
+	);
+
+	// Per-relay outcome handling mirrors handle-approval-decide.ts:
+	// persist the bubble, recurse into nested mentions (which may
+	// themselves be auto-approve or pending, depending on what the
+	// channel currently has set).
+	for (const outcome of outcomes) {
+		if ('error' in outcome) {
+			if (outcome.messageId === '') {
+				emit({
+					type: 'system',
+					body: `relay to ${outcome.agentId} failed: ${outcome.error}`
+				});
+			}
+			continue;
+		}
+
+		const nestedRow = recordAgentMessage({
+			id: outcome.messageId,
+			channelId,
+			body: outcome.body,
+			agentId: outcome.agentId,
+			tokens: outcome.tokens
+		});
+
+		const nestedMentioned = resolveMentionedAgents(channelId, outcome.body).filter(
+			(id) => id !== outcome.agentId
+		);
+		if (nestedMentioned.length === 0) continue;
+
+		// Recurse. The channel is still auto-approve (the user hasn't
+		// had a chance to flip it mid-dispatch), so the next hop is
+		// also auto-approved — until the roundtrip cap stops the
+		// recursion.
+		await dispatchAutoApprove({
+			channelId,
+			messageId: nestedRow.id,
+			body: outcome.body,
+			targets: nestedMentioned,
+			emit
+		});
 	}
 }

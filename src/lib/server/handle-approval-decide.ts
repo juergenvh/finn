@@ -28,6 +28,7 @@ import {
 	decideApproval,
 	markRouted,
 	createPendingApproval,
+	createRoutedApproval,
 	targetsOf,
 	type ApprovalDecision
 } from './approvals.ts';
@@ -35,6 +36,7 @@ import { recordAgentMessage } from './messages.ts';
 import { streamToAgent } from './connectors/registry.ts';
 import { resolveMentionedAgents } from './mentions.ts';
 import { tryConsumeRoundtrip } from './loop-defence.ts';
+import { readAutoApprove } from './channel-settings.ts';
 import type { Emit } from './ws/attach.ts';
 
 export type ApprovalDecideArgs = {
@@ -158,11 +160,26 @@ export async function handleApprovalDecide(args: ApprovalDecideArgs, emit: Emit)
 		});
 
 		// A relayed reply may itself mention yet another agent and
-		// create a fresh pending approval (ADR-0005 recursion).
+		// create a fresh approval (ADR-0005 recursion). The new
+		// approval honours the channel's current auto-approve flag:
+		// if a user hand-approved their way into this branch but the
+		// channel is auto-approve-on, the nested hops route directly
+		// (consistent with how a fresh user message would behave in
+		// the same channel).
 		const mentioned = resolveMentionedAgents(original.channelId, outcome.body).filter(
 			(id) => id !== outcome.agentId
 		);
-		if (mentioned.length > 0) {
+		if (mentioned.length === 0) continue;
+
+		if (readAutoApprove(original.channelId)) {
+			await dispatchAutoApproveNested({
+				channelId: original.channelId,
+				messageId: agentRow.id,
+				body: outcome.body,
+				targets: mentioned,
+				emit
+			});
+		} else {
 			const newApproval = createPendingApproval({
 				messageId: agentRow.id,
 				defaultTargets: mentioned
@@ -180,4 +197,106 @@ export async function handleApprovalDecide(args: ApprovalDecideArgs, emit: Emit)
 		type: 'approval_updated',
 		approval: { ...routed, targets: targetsOf(routed) }
 	});
+}
+
+/**
+ * Auto-approve dispatch for a nested mention reached *from inside*
+ * the approval-decide path. Same shape as handle-user-message's
+ * `dispatchAutoApprove`, kept local to keep the two flows readable
+ * side-by-side rather than smearing into a single 5-parameter
+ * helper. Consolidate only if a third caller appears.
+ */
+async function dispatchAutoApproveNested(args: {
+	channelId: string;
+	messageId: string;
+	body: string;
+	targets: string[];
+	emit: Emit;
+}): Promise<void> {
+	const { channelId, messageId, body, targets, emit } = args;
+
+	const dispatchTargets: string[] = [];
+	let capHit: { used: number; cap: number } | null = null;
+	for (const t of targets) {
+		const gate = tryConsumeRoundtrip(channelId);
+		if (!gate.allowed) {
+			capHit = { used: gate.used, cap: gate.cap };
+			break;
+		}
+		dispatchTargets.push(t);
+	}
+
+	const nestedApproval = createRoutedApproval({
+		messageId,
+		targets: dispatchTargets,
+		createdVia: 'auto_approve'
+	});
+	emit({
+		type: 'approval_created',
+		approval: { ...nestedApproval, targets: targetsOf(nestedApproval) },
+		message_id: messageId
+	});
+
+	if (capHit) {
+		const skipped = targets.length - dispatchTargets.length;
+		emit({
+			type: 'system',
+			body:
+				`Roundtrip cap of ${capHit.cap} reached for this channel — ` +
+				`${skipped} relay${skipped === 1 ? '' : 's'} skipped. ` +
+				`The next user message resets the counter.`
+		});
+	}
+
+	if (dispatchTargets.length === 0) return;
+
+	const outcomes = await Promise.all(
+		dispatchTargets.map(async (targetAgentId) => {
+			try {
+				return await streamToAgent(
+					{ agent_id: targetAgentId, channel_id: channelId, body },
+					emit
+				);
+			} catch (err) {
+				return {
+					agentId: targetAgentId,
+					messageId: '',
+					error: (err as Error).message ?? String(err)
+				};
+			}
+		})
+	);
+
+	for (const outcome of outcomes) {
+		if ('error' in outcome) {
+			if (outcome.messageId === '') {
+				emit({
+					type: 'system',
+					body: `relay to ${outcome.agentId} failed: ${outcome.error}`
+				});
+			}
+			continue;
+		}
+
+		const nestedRow = recordAgentMessage({
+			id: outcome.messageId,
+			channelId,
+			body: outcome.body,
+			agentId: outcome.agentId,
+			tokens: outcome.tokens
+		});
+
+		const nestedMentioned = resolveMentionedAgents(channelId, outcome.body).filter(
+			(id) => id !== outcome.agentId
+		);
+		if (nestedMentioned.length === 0) continue;
+
+		await dispatchAutoApproveNested({
+			channelId,
+			messageId: nestedRow.id,
+			body: outcome.body,
+			targets: nestedMentioned,
+			emit
+		});
+	}
 }

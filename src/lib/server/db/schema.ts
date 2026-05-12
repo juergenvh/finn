@@ -144,7 +144,21 @@ export const approvals = sqliteTable('approvals', {
 	targetedAgentIds: text('targeted_agent_ids').notNull().default('[]'),
 	rejectReason: text('reject_reason'),
 	createdAt: integer('created_at').notNull(),
-	decidedAt: integer('decided_at')
+	decidedAt: integer('decided_at'),
+	/** How the row was created. Distinguishes the three ways a row
+	 * reaches `routed` for protocol-viewer audit (ADR-0015 §6).
+	 *
+	 * - `'mention'` — agent reply mentioned other agents; default
+	 *   path through pending→approved→routed.
+	 * - `'forward'` — user-triggered forward (ADR-0014); created
+	 *   directly in `routed`.
+	 * - `'auto_approve'` — channel had `settings_channel.auto_approve`
+	 *   set; created directly in `routed` (ADR-0015).
+	 *
+	 * NULL for pre-feature rows; readers default missing values to
+	 * `'mention'` since that was the only path before this column
+	 * landed. */
+	createdVia: text('created_via', { enum: ['mention', 'forward', 'auto_approve'] })
 });
 
 /* ------------------------------------------------------------------ settings */
