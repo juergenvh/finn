@@ -111,10 +111,19 @@ export async function handleApprovalDecide(args: ApprovalDecideArgs, emit: Emit)
 		});
 	}
 
-	const outcomes = await Promise.all(
+	// Per-target task: stream the relay, then — *as soon as that
+	// individual stream completes* — persist the row and create the
+	// nested approval (or recurse). Doing the post-processing
+	// inside the per-target promise means the next approval button
+	// pops up the moment its agent finishes, not when the slowest
+	// sibling does (issue #81).
+	await Promise.all(
 		dispatchTargets.map(async (targetAgentId) => {
+			let outcome:
+				| Awaited<ReturnType<typeof streamToAgent>>
+				| { agentId: string; messageId: string; error: string };
 			try {
-				return await streamToAgent(
+				outcome = await streamToAgent(
 					{
 						agent_id: targetAgentId,
 						channel_id: original.channelId,
@@ -123,74 +132,72 @@ export async function handleApprovalDecide(args: ApprovalDecideArgs, emit: Emit)
 					emit
 				);
 			} catch (err) {
-				return {
+				outcome = {
 					agentId: targetAgentId,
 					messageId: '',
 					error: (err as Error).message ?? String(err)
 				};
 			}
-		})
-	);
 
-	for (const outcome of outcomes) {
-		if ('error' in outcome) {
-			// `streamToAgent` already emitted `message_error` for the
-			// per-agent path (when it got far enough to mint a
-			// message id). The empty-messageId pre-stream failure
-			// case is rarer; surface it once via system event so the
-			// user is not left wondering why a target produced no
-			// bubble at all.
-			if (outcome.messageId === '') {
+			if ('error' in outcome) {
+				// `streamToAgent` already emitted `message_error` for
+				// the per-agent path (when it got far enough to mint a
+				// message id). The empty-messageId pre-stream failure
+				// case is rarer; surface it once via system event so
+				// the user is not left wondering why a target produced
+				// no bubble at all.
+				if (outcome.messageId === '') {
+					emit({
+						type: 'system',
+						body: `relay to ${outcome.agentId} failed: ${outcome.error}`
+					});
+				}
+				return;
+			}
+
+			const agentRow = recordAgentMessage({
+				id: outcome.messageId,
+				channelId: original.channelId,
+				body: outcome.body,
+				agentId: outcome.agentId,
+				tokens: outcome.tokens
+			});
+
+			// A relayed reply may itself mention yet another agent
+			// and create a fresh approval (ADR-0005 recursion). The
+			// new approval honours the channel's current
+			// auto-approve flag: if the user hand-approved their
+			// way into this branch but the channel is auto-
+			// approve-on, nested hops route directly (consistent
+			// with how a fresh user message would behave in the
+			// same channel).
+			const mentioned = resolveMentionedAgents(
+				original.channelId,
+				outcome.body
+			).filter((id) => id !== outcome.agentId);
+			if (mentioned.length === 0) return;
+
+			if (readAutoApprove(original.channelId)) {
+				await dispatchAutoApproveNested({
+					channelId: original.channelId,
+					messageId: agentRow.id,
+					body: outcome.body,
+					targets: mentioned,
+					emit
+				});
+			} else {
+				const newApproval = createPendingApproval({
+					messageId: agentRow.id,
+					defaultTargets: mentioned
+				});
 				emit({
-					type: 'system',
-					body: `relay to ${outcome.agentId} failed: ${outcome.error}`
+					type: 'approval_created',
+					approval: { ...newApproval, targets: targetsOf(newApproval) },
+					message_id: agentRow.id
 				});
 			}
-			continue;
-		}
-
-		// Persist the completed stream as one row, using the message
-		// id the dispatcher already announced via `message_start`.
-		const agentRow = recordAgentMessage({
-			id: outcome.messageId,
-			channelId: original.channelId,
-			body: outcome.body,
-			agentId: outcome.agentId,
-			tokens: outcome.tokens
-		});
-
-		// A relayed reply may itself mention yet another agent and
-		// create a fresh approval (ADR-0005 recursion). The new
-		// approval honours the channel's current auto-approve flag:
-		// if a user hand-approved their way into this branch but the
-		// channel is auto-approve-on, the nested hops route directly
-		// (consistent with how a fresh user message would behave in
-		// the same channel).
-		const mentioned = resolveMentionedAgents(original.channelId, outcome.body).filter(
-			(id) => id !== outcome.agentId
-		);
-		if (mentioned.length === 0) continue;
-
-		if (readAutoApprove(original.channelId)) {
-			await dispatchAutoApproveNested({
-				channelId: original.channelId,
-				messageId: agentRow.id,
-				body: outcome.body,
-				targets: mentioned,
-				emit
-			});
-		} else {
-			const newApproval = createPendingApproval({
-				messageId: agentRow.id,
-				defaultTargets: mentioned
-			});
-			emit({
-				type: 'approval_created',
-				approval: { ...newApproval, targets: targetsOf(newApproval) },
-				message_id: agentRow.id
-			});
-		}
-	}
+		})
+	);
 
 	const routed = markRouted(args.approval_id);
 	emit({
@@ -250,53 +257,57 @@ async function dispatchAutoApproveNested(args: {
 
 	if (dispatchTargets.length === 0) return;
 
-	const outcomes = await Promise.all(
+	// Inline per-target post-processing — see issue #81. A slow
+	// nested relay must not delay the audit/dispatch events for the
+	// fast sibling next to it.
+	await Promise.all(
 		dispatchTargets.map(async (targetAgentId) => {
+			let outcome:
+				| Awaited<ReturnType<typeof streamToAgent>>
+				| { agentId: string; messageId: string; error: string };
 			try {
-				return await streamToAgent(
+				outcome = await streamToAgent(
 					{ agent_id: targetAgentId, channel_id: channelId, body },
 					emit
 				);
 			} catch (err) {
-				return {
+				outcome = {
 					agentId: targetAgentId,
 					messageId: '',
 					error: (err as Error).message ?? String(err)
 				};
 			}
+
+			if ('error' in outcome) {
+				if (outcome.messageId === '') {
+					emit({
+						type: 'system',
+						body: `relay to ${outcome.agentId} failed: ${outcome.error}`
+					});
+				}
+				return;
+			}
+
+			const nestedRow = recordAgentMessage({
+				id: outcome.messageId,
+				channelId,
+				body: outcome.body,
+				agentId: outcome.agentId,
+				tokens: outcome.tokens
+			});
+
+			const nestedMentioned = resolveMentionedAgents(channelId, outcome.body).filter(
+				(id) => id !== outcome.agentId
+			);
+			if (nestedMentioned.length === 0) return;
+
+			await dispatchAutoApproveNested({
+				channelId,
+				messageId: nestedRow.id,
+				body: outcome.body,
+				targets: nestedMentioned,
+				emit
+			});
 		})
 	);
-
-	for (const outcome of outcomes) {
-		if ('error' in outcome) {
-			if (outcome.messageId === '') {
-				emit({
-					type: 'system',
-					body: `relay to ${outcome.agentId} failed: ${outcome.error}`
-				});
-			}
-			continue;
-		}
-
-		const nestedRow = recordAgentMessage({
-			id: outcome.messageId,
-			channelId,
-			body: outcome.body,
-			agentId: outcome.agentId,
-			tokens: outcome.tokens
-		});
-
-		const nestedMentioned = resolveMentionedAgents(channelId, outcome.body).filter(
-			(id) => id !== outcome.agentId
-		);
-		if (nestedMentioned.length === 0) continue;
-
-		await dispatchAutoApproveNested({
-			channelId,
-			messageId: nestedRow.id,
-			body: outcome.body,
-			targets: nestedMentioned,
-			emit
-		});
-	}
 }

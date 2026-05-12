@@ -328,9 +328,32 @@ async function streamOneAgent(
  * to a channel member are surfaced via
  * `diagnostics.unresolvedMentionTokens` for the caller to warn on.
  */
+/**
+ * Optional per-reply callback for callers that want to act on a
+ * completed reply *as soon as it completes*, without waiting for
+ * the slowest agent in the fan-out.
+ *
+ * The default approval-creation path in `handle-user-message.ts`
+ * uses this to emit `approval_created` events immediately after
+ * each `message_end`. Without the callback, all approval events
+ * would be deferred behind the slowest reply in a multi-agent
+ * channel — a noticeable latency in 3+ agent channels (issue #81).
+ *
+ * The callback runs sequentially per reply (its returned promise
+ * is awaited before the per-agent task resolves) so callers can
+ * safely chain async work like nested dispatch without worrying
+ * about interleaving with other recipients' callbacks. Errors
+ * thrown by the callback are caught and surfaced via the
+ * per-agent result, mirroring how mid-stream errors are reported.
+ */
+export type OnReplyComplete = (
+	reply: StreamedDispatchedReply
+) => void | Promise<void>;
+
 export async function streamUserMessage(
 	args: { channel_id: string; body: string },
-	emit: StreamEmit
+	emit: StreamEmit,
+	onReplyComplete?: OnReplyComplete
 ): Promise<StreamDispatchResult> {
 	requireChannel(args.channel_id);
 	const members = memberAgentsOf(args.channel_id);
@@ -346,9 +369,30 @@ export async function streamUserMessage(
 	} = resolveRecipients(args.channel_id, args.body, members);
 
 	const replies: StreamDispatchResult['replies'] = await Promise.all(
-		recipients.map((agent) =>
-			streamOneAgent(agent, args.channel_id, args.body, emit)
-		)
+		recipients.map(async (agent) => {
+			const outcome = await streamOneAgent(agent, args.channel_id, args.body, emit);
+			if (!('error' in outcome) && onReplyComplete) {
+				try {
+					await onReplyComplete(outcome);
+				} catch (err) {
+					// Surface the callback failure as a per-agent
+					// error outcome so the caller's downstream loop
+					// can treat it consistently with mid-stream
+					// errors. The agent's bubble is already rendered
+					// (message_end was emitted by streamOneAgent),
+					// so we don't try to retract it; we just mark
+					// the post-processing as failed.
+					return {
+						agentId: outcome.agentId,
+						messageId: outcome.messageId,
+						error:
+							'post-stream callback failed: ' +
+							((err as Error).message ?? String(err))
+					};
+				}
+			}
+			return outcome;
+		})
 	);
 
 	return {

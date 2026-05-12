@@ -24,7 +24,11 @@
 
 import type { Emit, BroadcastMessage } from './ws/attach.ts';
 import { recordUserMessage, recordAgentMessage } from './messages.ts';
-import { streamUserMessage, streamToAgent } from './connectors/registry.ts';
+import {
+	streamUserMessage,
+	streamToAgent,
+	type StreamedDispatchedReply
+} from './connectors/registry.ts';
 import { resolveMentionedAgents } from './mentions.ts';
 import { createPendingApproval, createRoutedApproval, targetsOf } from './approvals.ts';
 import { readAutoApprove } from './channel-settings.ts';
@@ -52,11 +56,60 @@ export async function handleUserMessage(
 	const userRow = recordUserMessage({ channelId: args.channel_id, body: args.body });
 	emit(userMessageBroadcast(userRow, userRow.senderId ?? 'jurgen'));
 
+	// Channels with `settings_channel.auto_approve = true` skip the
+	// human-in-the-loop gate for agent-to-agent mentions (ADR-0015).
+	// Read once per user-turn — changes mid-stream are not a thing
+	// we model, and refreshing the flag per reply would add a DB
+	// read into the hot path for no useful semantic.
+	const autoApprove = readAutoApprove(args.channel_id);
+
+	// Per-reply handler invoked by `streamUserMessage` *as soon as*
+	// each agent's stream completes — not deferred behind the slowest
+	// agent in the fan-out (issue #81). For multi-agent channels this
+	// is the difference between the approval-button appearing in
+	// ~50ms after the fast agent finishes vs. ~30s after the slowest
+	// one does.
+	const onReplyComplete = async (reply: StreamedDispatchedReply) => {
+		const agentRow = recordAgentMessage({
+			id: reply.messageId,
+			channelId: args.channel_id,
+			body: reply.body,
+			agentId: reply.agentId,
+			tokens: reply.tokens
+		});
+
+		const mentioned = resolveMentionedAgents(args.channel_id, reply.body).filter(
+			(id) => id !== reply.agentId
+		);
+		if (mentioned.length === 0) return;
+
+		if (autoApprove) {
+			await dispatchAutoApprove({
+				channelId: args.channel_id,
+				messageId: agentRow.id,
+				body: reply.body,
+				targets: mentioned,
+				emit
+			});
+		} else {
+			const approval = createPendingApproval({
+				messageId: agentRow.id,
+				defaultTargets: mentioned
+			});
+			emit({
+				type: 'approval_created',
+				approval: { ...approval, targets: targetsOf(approval) },
+				message_id: agentRow.id
+			});
+		}
+	};
+
 	let result: Awaited<ReturnType<typeof streamUserMessage>>;
 	try {
 		result = await streamUserMessage(
 			{ channel_id: args.channel_id, body: args.body },
-			emit
+			emit,
+			onReplyComplete
 		);
 	} catch (err) {
 		emit({ type: 'system', body: `dispatch error: ${(err as Error).message}` });
@@ -86,63 +139,11 @@ export async function handleUserMessage(
 		}
 	}
 
-	// Channels with `settings_channel.auto_approve = true` skip the
-	// human-in-the-loop gate for agent-to-agent mentions (ADR-0015).
-	// Read once per user-turn — changes mid-stream are not a thing
-	// we model, and refreshing the flag per reply would add a DB
-	// read into the hot path for no useful semantic.
-	const autoApprove = readAutoApprove(args.channel_id);
-
-	for (const reply of result.replies) {
-		if ('error' in reply) {
-			// `streamUserMessage` already emitted `message_error` for
-			// the per-agent path. The client handles it directly
-			// (failed-bubble UX); no DB row is written and no
-			// additional system event is needed.
-			continue;
-		}
-
-		// Persist the completed stream as one row, using the message id
-		// the dispatcher already announced via `message_start`. The
-		// client reconciles its in-flight buffer on `message_end`; no
-		// legacy `message` event is emitted (phase 2b).
-		const agentRow = recordAgentMessage({
-			id: reply.messageId,
-			channelId: args.channel_id,
-			body: reply.body,
-			agentId: reply.agentId,
-			tokens: reply.tokens
-		});
-
-		// Mentions in the agent reply that resolve to OTHER agents in
-		// the channel become the default approval target set. The
-		// authoring agent itself is excluded — agents do not need
-		// approval to "talk to themselves".
-		const mentioned = resolveMentionedAgents(args.channel_id, reply.body).filter(
-			(id) => id !== reply.agentId
-		);
-		if (mentioned.length === 0) continue;
-
-		if (autoApprove) {
-			await dispatchAutoApprove({
-				channelId: args.channel_id,
-				messageId: agentRow.id,
-				body: reply.body,
-				targets: mentioned,
-				emit
-			});
-		} else {
-			const approval = createPendingApproval({
-				messageId: agentRow.id,
-				defaultTargets: mentioned
-			});
-			emit({
-				type: 'approval_created',
-				approval: { ...approval, targets: targetsOf(approval) },
-				message_id: agentRow.id
-			});
-		}
-	}
+	// Errors are reported per-agent via the dispatcher's per-agent
+	// emit (message_error) and surface here as `'error' in reply`
+	// outcomes; nothing else to do — the inline onReplyComplete
+	// callback already persisted the successful ones and created
+	// their approvals.
 }
 
 /**
@@ -214,61 +215,62 @@ async function dispatchAutoApprove(args: {
 
 	if (dispatchTargets.length === 0) return;
 
-	const outcomes = await Promise.all(
+	// Per-target task: stream the relay, then persist + recurse
+	// inline as soon as *this* target's stream completes. Issue #81:
+	// a slow Anthropic relay must not delay the approval/dispatch
+	// event for the fast OpenClaw sibling sitting next to it.
+	await Promise.all(
 		dispatchTargets.map(async (targetAgentId) => {
+			let outcome:
+				| Awaited<ReturnType<typeof streamToAgent>>
+				| { agentId: string; messageId: string; error: string };
 			try {
-				return await streamToAgent(
+				outcome = await streamToAgent(
 					{ agent_id: targetAgentId, channel_id: channelId, body },
 					emit
 				);
 			} catch (err) {
-				return {
+				outcome = {
 					agentId: targetAgentId,
 					messageId: '',
 					error: (err as Error).message ?? String(err)
 				};
 			}
+
+			if ('error' in outcome) {
+				if (outcome.messageId === '') {
+					emit({
+						type: 'system',
+						body: `relay to ${outcome.agentId} failed: ${outcome.error}`
+					});
+				}
+				return;
+			}
+
+			const nestedRow = recordAgentMessage({
+				id: outcome.messageId,
+				channelId,
+				body: outcome.body,
+				agentId: outcome.agentId,
+				tokens: outcome.tokens
+			});
+
+			const nestedMentioned = resolveMentionedAgents(channelId, outcome.body).filter(
+				(id) => id !== outcome.agentId
+			);
+			if (nestedMentioned.length === 0) return;
+
+			// Recurse. The channel is still auto-approve (the user
+			// hasn't had a chance to flip it mid-dispatch), so the
+			// next hop is also auto-approved — until the roundtrip
+			// cap stops the recursion.
+			await dispatchAutoApprove({
+				channelId,
+				messageId: nestedRow.id,
+				body: outcome.body,
+				targets: nestedMentioned,
+				emit
+			});
 		})
 	);
-
-	// Per-relay outcome handling mirrors handle-approval-decide.ts:
-	// persist the bubble, recurse into nested mentions (which may
-	// themselves be auto-approve or pending, depending on what the
-	// channel currently has set).
-	for (const outcome of outcomes) {
-		if ('error' in outcome) {
-			if (outcome.messageId === '') {
-				emit({
-					type: 'system',
-					body: `relay to ${outcome.agentId} failed: ${outcome.error}`
-				});
-			}
-			continue;
-		}
-
-		const nestedRow = recordAgentMessage({
-			id: outcome.messageId,
-			channelId,
-			body: outcome.body,
-			agentId: outcome.agentId,
-			tokens: outcome.tokens
-		});
-
-		const nestedMentioned = resolveMentionedAgents(channelId, outcome.body).filter(
-			(id) => id !== outcome.agentId
-		);
-		if (nestedMentioned.length === 0) continue;
-
-		// Recurse. The channel is still auto-approve (the user hasn't
-		// had a chance to flip it mid-dispatch), so the next hop is
-		// also auto-approved — until the roundtrip cap stops the
-		// recursion.
-		await dispatchAutoApprove({
-			channelId,
-			messageId: nestedRow.id,
-			body: outcome.body,
-			targets: nestedMentioned,
-			emit
-		});
-	}
 }
