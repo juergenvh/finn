@@ -306,7 +306,12 @@
 
 		<main>
 			{#each rows as r (r.id)}
-				<div class="hit" class:hidden-row={r.hiddenAt !== null}>
+				<div
+					class="hit"
+					class:hidden-row={r.hiddenAt !== null}
+					class:sender-user={r.senderType === 'user'}
+					class:sender-agent={r.senderType === 'agent'}
+				>
 					<div class="hit-header">
 						<a class="channel-pill" href={`/?channel=${r.channelId}`}>#{r.channelName}</a>
 						<span class="sender">
@@ -500,6 +505,16 @@
 		background: #16161a;
 		border: 1px solid #2a2a30;
 		border-radius: 6px;
+	}
+	/* Two-tone backgrounds to distinguish user from agent messages
+	 * at a glance in long audit trails (issue #93). System messages
+	 * keep the neutral .hit background. The shades sit close to the
+	 * channel-view palette so the audit surface reads as related. */
+	.hit.sender-user {
+		background: #1c1f2a;
+	}
+	.hit.sender-agent {
+		background: #1a1f1a;
 	}
 	.hit.hidden-row {
 		opacity: 0.6;
