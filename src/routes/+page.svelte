@@ -499,13 +499,31 @@
 			if (channels.length === 0) {
 				bootstrapError = 'no channels in DB; run `npm run db:seed` or use the + button';
 			} else {
-				activeChannelId = channels[0]!.id;
+				activeChannelId = pickInitialChannel();
 				await Promise.all(channels.map((c) => loadChannelData(c.id)));
 			}
 			connect();
 		} catch (err) {
 			bootstrapError = (err as Error).message;
 		}
+	}
+
+	// Issue #91: choose the channel to land on at startup or after
+	// returning from /settings. Precedence:
+	//   1. last-active channel from localStorage (if it still exists)
+	//   2. first channel in the (server-sorted) list
+	// settings.global.defaultChannelId is *not* wired in here yet;
+	// it remains a settings-surface-only knob today. If we want it
+	// to act as the global override that beats localStorage, that
+	// is a follow-up (would need an async fetch before bootstrap
+	// can pick a channel).
+	function pickInitialChannel(): string {
+		const ids = new Set(channels.map((c) => c.id));
+		if (typeof localStorage !== 'undefined') {
+			const last = localStorage.getItem('finn.lastActiveChannelId');
+			if (last && ids.has(last)) return last;
+		}
+		return channels[0]!.id;
 	}
 
 	function connect() {
@@ -648,6 +666,12 @@
 					await loadChannelData(msg.id);
 				} else if (msg.action === 'deleted' && activeChannelId === msg.id) {
 					activeChannelId = channels[0]?.id ?? null;
+					// Drop the now-invalid last-active hint (#91); the
+					// existence check in pickInitialChannel would also
+					// catch it, but clearing keeps localStorage tidy.
+					if (typeof localStorage !== 'undefined') {
+						localStorage.removeItem('finn.lastActiveChannelId');
+					}
 				}
 			} else if (msg.entity === 'agent') {
 				await loadAgents();
@@ -870,6 +894,11 @@
 		// Reset search and scroll state per channel.
 		searchQuery = '';
 		searchHits = [];
+		// Persist last-active so returning from /settings (or a
+		// fresh reload) brings the user back here (#91).
+		if (typeof localStorage !== 'undefined') {
+			localStorage.setItem('finn.lastActiveChannelId', id);
+		}
 	}
 
 	async function submitChannelForm(payload: ChannelFormPayload) {
