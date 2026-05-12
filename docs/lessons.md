@@ -667,3 +667,80 @@ participant at the end. *That* is what produced this lesson.
 *Verbatim prompts from the session are preserved in the workspace
 daily log `memory/2026-05-11.md` for future reference; this entry
 is the generalised distillation.*
+
+## 15. JSON-escape sequences in PR bodies — the lesson-#1 repeat — 2026-05-12
+
+Four PR bodies shipped between #83 and #87 contained literal
+`\u2014`, `\u2192`, `\u00fc` etc. instead of the actual UTF-8
+characters they encode (em-dash, right-arrow, u-umlaut, ...).
+Jürgen noticed reading the PR bodies on GitHub: *"ich sehe in
+github PR body oft noch die escape sequenz `\u2014`"*.
+
+This is **exactly the same class of bug as lesson #1** — just
+in a different surface. Lesson #1 caught it in the README at
+`git push` time. This one shipped through four PRs because the
+pre-merge gate is `npm run check`, which doesn't scan PR-body
+text.
+
+**Symptom.** PR bodies on GitHub render `\u2014` literally
+wherever an em-dash was intended. The repository source files
+are clean (correct UTF-8); only the PR body — the text that
+becomes the squash-merge commit message — carries the escape
+sequences.
+
+**Root cause.** The text I produced when authoring PR bodies
+went through a pathway where typographic characters got
+JSON-escaped rather than UTF-8-encoded. The intermediate
+file written for `gh pr create --body-file` already contained
+`\u2014` as six literal bytes (`\`, `u`, `2`, `0`, `1`, `4`),
+not the three-byte UTF-8 sequence (`0xe2 0x80 0x94`). Direct
+verification: `od -c` on the body file showed the literal
+backslash-u sequence.
+
+**Fix.**
+
+1. Existing PR bodies (#83, #85, #86, #87) corrected via
+   `gh pr edit --body-file` after running
+   `sed 's|\u2014|—|g; s|\u2192|→|g; ...'` on the existing
+   body text. The merge-commit messages themselves cannot be
+   retroactively rewritten without force-pushing main, which
+   we don't do; only the PR-body surface (which is what
+   readers actually look at) is updated.
+2. Same-class bug in `docs/decisions/0011-channel-view-kb-budget.md`
+   table cells (`\"Last 200\"`) corrected in this PR.
+3. Going forward: PR-body authoring uses **ASCII alternatives**
+   for problem characters when in doubt. Em-dash → `--`,
+   right-arrow → `->`, en-dash → `-`. Less typographic, more
+   robust to whatever escape layer is in the path. The
+   repository source markdown (lessons, ADRs, README) can keep
+   the proper Unicode characters because `npm run check` plus
+   the `git push` visual review catches them — the surface that
+   was *not* covered was the PR body itself.
+4. Optional belt-and-braces: add a pre-`gh pr create` grep
+   check (`grep -P '\\u[0-9a-fA-F]{4}|\\"' body.md` — the same
+   pattern from `AGENTS.md` smoke-test for README escapes). If
+   it matches, hand-fix before the PR is opened.
+
+**Meta.** Lesson #1 fixed the README path. The bug returned in
+a different surface (PR bodies) because the lesson lived in
+`lessons.md` for the *repository*, not in a personal authoring
+checklist that covers every public output. The honest move is
+to extend the lesson to cover every output that becomes
+long-term human-readable text — not just files committed to the
+repo. PR bodies, ADR comments, issue comments, release notes
+are all in scope.
+
+The relevant verification command from `AGENTS.md` is the smoke
+test already documented there:
+
+```
+grep -P '\u[0-9a-fA-F]{4}|\\["nrt]' file.md
+```
+
+I now run this against PR body files (`/tmp/pr-body-*.md`)
+before the `gh pr create` call. Two lines, fifteen seconds,
+catches the bug class entirely.
+
+**Sub-lesson:** *every* output surface that human eyes will see
+deserves the same UTF-8 hygiene as repository files. The
+repository is just the most obvious one.
