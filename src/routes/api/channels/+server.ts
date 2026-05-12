@@ -26,6 +26,12 @@ export const GET: RequestHandler = async () => {
 		.from(channels)
 		.where(isNull(channels.deletedAt))
 		.all();
+	// Sort by name on the server so every client surface (channel
+	// view, settings rail, protocol filter) sees the same order
+	// without having to duplicate the sort logic (issue #92).
+	// localeCompare keeps it stable across diacritics; matches the
+	// previous client-side sort in settings/+page.svelte.
+	rows.sort((a, b) => a.name.localeCompare(b.name));
 	return json({ channels: rows });
 };
 
