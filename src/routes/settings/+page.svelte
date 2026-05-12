@@ -128,7 +128,9 @@
 		const res = await fetch('/api/channels');
 		if (!res.ok) return;
 		const data = await res.json();
-		channels = (data.channels as ChannelInfo[]).slice().sort((a, b) => a.name.localeCompare(b.name));
+		// Server sorts by name (GET /api/channels, issue #92); no
+		// client-side re-sort needed.
+		channels = data.channels as ChannelInfo[];
 	}
 
 	async function loadChannelDetail(channelId: string) {
