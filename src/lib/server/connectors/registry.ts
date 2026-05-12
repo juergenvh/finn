@@ -328,9 +328,20 @@ async function streamOneAgent(
  * to a channel member are surfaced via
  * `diagnostics.unresolvedMentionTokens` for the caller to warn on.
  */
+/**
+ * Optional per-reply hook. Called inside the per-agent promise as
+ * soon as that agent's stream terminates cleanly, before the outer
+ * `Promise.all` resolves. The caller uses this to do per-reply
+ * work (persist row, create approval) without waiting for the
+ * slowest sibling — see #81. Errors thrown by the callback are
+ * converted into a per-agent error outcome.
+ */
+export type OnReplyComplete = (reply: StreamedDispatchedReply) => Promise<void>;
+
 export async function streamUserMessage(
 	args: { channel_id: string; body: string },
-	emit: StreamEmit
+	emit: StreamEmit,
+	onReplyComplete?: OnReplyComplete
 ): Promise<StreamDispatchResult> {
 	requireChannel(args.channel_id);
 	const members = memberAgentsOf(args.channel_id);
@@ -346,9 +357,23 @@ export async function streamUserMessage(
 	} = resolveRecipients(args.channel_id, args.body, members);
 
 	const replies: StreamDispatchResult['replies'] = await Promise.all(
-		recipients.map((agent) =>
-			streamOneAgent(agent, args.channel_id, args.body, emit)
-		)
+		recipients.map(async (agent) => {
+			const outcome = await streamOneAgent(agent, args.channel_id, args.body, emit);
+			if (onReplyComplete && !('error' in outcome)) {
+				try {
+					await onReplyComplete(outcome);
+				} catch (err) {
+					return {
+						agentId: outcome.agentId,
+						messageId: outcome.messageId,
+						error:
+							'post-stream callback failed: ' +
+							((err as Error).message ?? String(err))
+					};
+				}
+			}
+			return outcome;
+		})
 	);
 
 	return {
