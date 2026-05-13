@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { renderMarkdown } from './markdown';
+	import { mountMermaidBlocks, installThemeListener } from './mermaid';
 	import type { AgentInfo, ApprovalSnapshot, TokenUsage } from './types';
 
 	type Props = {
@@ -183,6 +184,10 @@
 		showDisclosure = !showDisclosure;
 	}
 
+	/* Body-element ref. Used to scope mermaid placeholder discovery
+	 * to this bubble after the markdown HTML has rendered (ADR-0022). */
+	let bodyEl: HTMLDivElement | null = $state(null);
+
 	/* Markdown rendering (ADR-0016).
 	 *
 	 * Same pipeline for user and agent bubbles — the sanitizer is
@@ -200,6 +205,30 @@
 		if (streaming) return null;
 		if (!body) return '';
 		return renderMarkdown(body, members);
+	});
+
+	/* Mermaid mounting (ADR-0022).
+	 *
+	 * After the markdown HTML lands, walk the body for
+	 * `pre[data-mermaid-source]` placeholders and replace them with
+	 * rendered SVG. The effect re-runs whenever `renderedBody`
+	 * changes — either because the bubble flipped from streaming to
+	 * settled (`message_end` arrived) or because the body itself
+	 * mutated. `mountMermaidBlocks` is idempotent via the
+	 * `data-mermaid-mounted` marker, so a re-run on an already-
+	 * rendered bubble is a no-op.
+	 *
+	 * Theme listener is installed once per page-life from the first
+	 * bubble that has a rendered body — cheap enough to gate on the
+	 * effect rather than a top-level side effect. */
+	$effect(() => {
+		// Touch renderedBody so Svelte re-runs us on body changes.
+		void renderedBody;
+		if (!bodyEl) return;
+		if (renderedBody === null) return;
+		installThemeListener();
+		// Wait for the {@html ...} commit, then mount.
+		void tick().then(() => mountMermaidBlocks(bodyEl));
 	});
 
 	/* Always-on footer for agent bubbles (ADR-0016 §9).
@@ -434,7 +463,12 @@
 			</div>
 		{/if}
 
-		<div class="body" class:body-plain={renderedBody === null} class:body-rich={renderedBody !== null}>
+		<div
+			bind:this={bodyEl}
+			class="body"
+			class:body-plain={renderedBody === null}
+			class:body-rich={renderedBody !== null}
+		>
 			{#if renderedBody === null}
 				<!-- system messages and streaming bubbles render plain -->
 				{#if body}{body}{/if}{#if streaming}<span class="cursor" aria-hidden="true">▌</span>{/if}
@@ -1019,6 +1053,44 @@
 		border: 0;
 		border-top: 1px solid #2a2a30;
 		margin: 0.7em 0;
+	}
+
+	/* Mermaid placeholder pre.mermaid-placeholder inherits global
+	 * `pre` styling above; no dedicated rule because the
+	 * placeholder disappears once the SVG is mounted. The
+	 * data-mermaid-source attribute is the renderer's hook; the
+	 * class is purely for human readability in devtools. */
+
+	/* Rendered mermaid SVG container. Sizing rules per ADR-0022
+	 * §Sizing: max-width (not width) so small diagrams aren't
+	 * upscaled; overflow-x on the container, not the SVG itself,
+	 * to avoid the collapse-to-pixels failure mode when width is
+	 * overridden while height: auto is left in place. */
+	.body-rich :global(.mermaid-rendered) {
+		margin: 0.5em 0;
+		overflow-x: auto;
+		background: rgba(0, 0, 0, 0.18);
+		border-radius: 5px;
+		padding: 0.6em;
+	}
+	.body-rich :global(.mermaid-rendered svg) {
+		max-width: 100%;
+		height: auto;
+		display: block;
+		margin: 0 auto;
+	}
+
+	/* Inline error caption shown when Mermaid parse / render fails.
+	 * The fallback code-block stays visible above this line, so the
+	 * user sees the source plus a small "could not render" hint. */
+	.body-rich :global(.mermaid-error) {
+		margin-top: 0.3em;
+		padding: 0.25em 0.55em;
+		border-radius: 3px;
+		background: rgba(127, 29, 29, 0.25);
+		color: #fca5a5;
+		font-size: 0.72rem;
+		font-family: inherit;
 	}
 
 	/* Mention spans (post-process from markdown.ts). Subtle

@@ -640,8 +640,39 @@ Markdown pipeline (“plain-while-streaming, finalised on end”).
 No syntax highlighter today — fenced code blocks just get a
 monospace block treatment with internal `pre` whitespace.
 
+**Mermaid diagrams.** Fenced code blocks with the language
+token `mermaid` are rendered as actual SVG diagrams in the
+bubble, not as monospace source. The renderer kicks in on
+`message_end` (mid-stream content is almost always unparseable;
+the bubble stays as a code block until the message settles).
+If the source fails to parse, the bubble falls back to the
+code-block render with a small inline error caption — the user
+sees the source either way.
+
+Example:
+
+```text
+```mermaid
+graph TD
+  A[start] --> B{question}
+  B -->|yes| C[ok]
+  B -->|no|  D[stop]
+```
+```
+
+Mermaid runs in `securityLevel: 'strict'` mode and the rendered
+SVG passes through a second DOMPurify pass with an explicit
+SVG allowlist. Connector authors do not need to escape anything
+special in the source — finn does the label-escape pass before
+handing the source to Mermaid. The strict mode does disable
+HTML labels, which means **no automatic text wrapping inside
+node labels**; long labels overflow visually. Use `<br>` or
+multiple short labels if wrap-shaped output matters.
+
 See [`docs/decisions/0016-rich-rendering.md`](decisions/0016-rich-rendering.md)
-for the full sanitiser policy and rationale.
+for the full sanitiser policy and
+[`docs/decisions/0022-mermaid-rendering.md`](decisions/0022-mermaid-rendering.md)
+for the Mermaid-specific pipeline and security rationale.
 
 ## Routing modes (where the connectors get called from)
 

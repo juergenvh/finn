@@ -17,11 +17,66 @@
  * sanitizer policy.
  */
 
-import { marked } from 'marked';
+import { marked, Renderer, type Tokens } from 'marked';
 import DOMPurify, { type Config as DOMPurifyConfig } from 'dompurify';
 import type { AgentInfo } from './types';
 
 /* ---------- marked configuration --------------------------- */
+
+/**
+ * Custom renderer for fenced code blocks. When the language token
+ * is `mermaid` (case-insensitive), we emit a placeholder element
+ * that carries the diagram source in a data-attribute. The
+ * `MermaidBlock.svelte` component later finds these placeholders
+ * via `querySelectorAll('pre[data-mermaid-source]')` and replaces
+ * them with rendered SVG (ADR-0022).
+ *
+ * The source is **base64-encoded** in the data-attribute for two
+ * reasons:
+ *
+ *   1. DOMPurify can't accidentally interpret it as HTML. The
+ *      `<` / `>` / `&` characters that mermaid syntax contains
+ *      pass straight through the sanitizer because they live
+ *      inside an attribute value, not in text content.
+ *   2. The fallback `<code>` body (visible if the renderer never
+ *      runs — e.g. SSR before hydration, or while the message is
+ *      still streaming) shows the escaped source as a plain code
+ *      block, matching ADR-0022's streaming/fallback contract.
+ *
+ * Per ADR-0022 §Pipeline: interception at the parser level keeps
+ * the sanitizer's view of the bubble unchanged. The mermaid source
+ * never travels as HTML.
+ */
+const mermaidRenderer = new Renderer();
+const defaultCodeRenderer = mermaidRenderer.code.bind(mermaidRenderer);
+mermaidRenderer.code = function ({ text, lang, escaped }: Tokens.Code): string {
+	if (typeof lang === 'string' && lang.trim().toLowerCase() === 'mermaid') {
+		// btoa works on latin-1 only; encodeURIComponent → unescape
+		// is the canonical "any unicode → base64" path in browsers,
+		// and Buffer is available SSR-side via the marked → node path.
+		const b64 = encodeBase64Utf8(text);
+		const escapedText = escapeHtml(text);
+		return `<pre data-mermaid-source="${b64}" class="mermaid-placeholder"><code>${escapedText}</code></pre>`;
+	}
+	return defaultCodeRenderer({ text, lang, escaped, type: 'code', raw: '' } as Tokens.Code);
+};
+
+function encodeBase64Utf8(s: string): string {
+	if (typeof window === 'undefined' && typeof Buffer !== 'undefined') {
+		return Buffer.from(s, 'utf-8').toString('base64');
+	}
+	// Browser path: utf-8 → percent-escapes → byte-string → btoa.
+	return btoa(unescape(encodeURIComponent(s)));
+}
+
+function escapeHtml(s: string): string {
+	return s
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
 
 /**
  * `breaks: true` turns single newlines into `<br>` (chat-shaped
@@ -35,7 +90,8 @@ import type { AgentInfo } from './types';
  */
 marked.use({
 	gfm: true,
-	breaks: true
+	breaks: true,
+	renderer: mermaidRenderer
 });
 
 /* ---------- DOMPurify allowlist ---------------------------- */
@@ -58,6 +114,10 @@ const SANITIZE_CONFIG: DOMPurifyConfig = {
 	// schemes are handled by DOMPurify's defaults plus our hook
 	// below.
 	FORBID_ATTR: ['target'],
+	// Allow our mermaid-placeholder data-attribute through the
+	// sanitizer. ADR-0022 §Pipeline relies on this so the renderer
+	// component can discover placeholders post-sanitize.
+	ADD_ATTR: ['data-mermaid-source'],
 	// We never need raw <html>/<body> wrappers; DOMPurify will
 	// honour this. Adds a strict mode for the output.
 	WHOLE_DOCUMENT: false,
