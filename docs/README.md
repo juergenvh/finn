@@ -37,7 +37,8 @@ docs/
     ├── 0019-settings-surface.md
     ├── 0020-roundtrip-cap.md
     ├── 0021-multi-agent-channel-initiation.md
-    └── 0022-mermaid-rendering.md
+    ├── 0022-mermaid-rendering.md
+    └── 0023-image-rendering.md
 ```
 
 ## Decisions (ADRs)
@@ -82,6 +83,7 @@ across the project (not per-area).
 | 0020 | Per-channel roundtrip cap                              | hard ceiling on hop count per user-turn-window to bound runaway multi-agent loops. Pre-consumed at dispatch, audit-row emitted on cap-trip with empty `targets[]` and a system-event note. ADR-0015 §5a is what this ships. **Accepted, shipped via #76.** |
 | 0021 | Multi-agent channel initiation patterns                | four structural elements for producing convergent multi-agent design output: setup-prompt (mode + topology + constraint), anstoss-prompt (topic + output + quality forcing functions), explicit hop-1 role distribution, roundtrip cap as quality constraint. Discovery ADR; four implementation options sketched, current vote is Option B (per-channel `initiation_template` field). Promote on second confirming session. **Status: discovery.** |
 | 0022 | Mermaid diagram rendering in message bubbles           | fenced `mermaid` blocks render as SVG diagrams in agent and user bubbles. Three-layer sanitiser (pre-escape label content, `securityLevel: 'strict'` with `htmlLabels: false`, post-render DOMPurify with explicit SVG allowlist). Lazy-loaded mermaid bundle, in-memory cache keyed `(source, theme, version)`. Plain-while-streaming, finalised on `message_end` with 150 ms fade. Issue #80. **Accepted, shipped via #102.** |
+| 0023 | Image rendering in message bubbles                     | `![alt](https://...)` markdown renders as actual `<img>` in agent and user bubbles. Two-layer defense: DOMPurify scheme filter (HTTPS only) and attribute allowlist (`src`, `alt`, `title`); plus `referrerpolicy="no-referrer"` and `loading="lazy"` injected post-sanitize. Failure mode: literal markdown text + small error caption. CSP and composer paste/upload deliberately deferred to their own ADRs (#105, #106). Issue #101. **Accepted 2026-05-13; implementation PR to follow.** |
 
 ## Setup guides
 

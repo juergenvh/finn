@@ -1,6 +1,6 @@
 # ADR 0023 — Image rendering in message bubbles
 
-- **Status:** discovery
+- **Status:** accepted (2026-05-13; implementation PR to follow)
 - **Date:** 2026-05-13
 - **Deciders:** Jürgen, Dixie
 - **Related:** ADR-0022 (mermaid rendering — companion piece;
@@ -161,9 +161,11 @@ Three vectors, three mitigations:
    **Decision:** CSP is its own follow-up — adding a
    Response header touches every server-render path and
    needs its own audit (inline styles, websocket origins,
-   etc.). Image rendering ships **without** CSP in v1; the
-   sanitiser allowlist plus scheme filter is the boundary.
-   Tracked as a separate issue after this ADR lands.
+   Vite dev-mode injection, etc.). Image rendering ships
+   **without** CSP in v1; the sanitiser allowlist plus
+   scheme filter is the boundary. Tracked as **issue #106**
+   (Discovery: Content-Security-Policy headers, filed
+   2026-05-13).
 
 ### 6. Sizing / theming
 
@@ -258,10 +260,13 @@ Anticipated files touched:
   bigger build (storage layout, GC, auth, URL signing).
 - **Image upload from the composer.** Today's request is agent
   output rendering. User-side image send is a connector and
-  storage question, not a render question.
+  storage question, not a render question. Tracked as
+  **issue #105** (Discovery: paste / upload images in the
+  composer).
 - **Click-to-zoom / lightbox modal.** Same call as mermaid.
 - **CSP headers.** Reasonable forcing function but its own audit
-  surface. Separate issue post-merge.
+  surface. Tracked as **issue #106** (Discovery: Content-Security-
+  Policy headers).
 - **Hostname allowlist for `<img src>`.** Possible v2 hardening
   if users hit phishing-ish behaviour from agent output. v1
   trusts HTTPS as the boundary.
@@ -294,56 +299,59 @@ Anticipated files touched:
   explicitly defers that to its own ticket so it gets the
   audit it deserves.
 
-## Open questions for review
+## Review resolution (2026-05-13)
 
-Marked here so the multi-agent / Jürgen-side review pass can
-land tightly on the load-bearing decisions before code:
+The four open questions were resolved by solo review with
+Jürgen on 2026-05-13 08:08; all four pinned answers held.
+ADR flipped from `discovery` to `accepted`. The original
+questions and their resolutions, recorded here so the
+rationale isn't lost:
 
-1. **Confirm `https://`-only is the right v1 boundary.** Are
-   there real agent scenarios in the next 30 days where
-   `http://` or `data:` is the only available source? If yes,
-   that argues for at least the `data:` path landing
-   alongside v1.
+1. **`https://`-only as v1 boundary.** Confirmed. Wintermute
+   moving to Haiku 4.5 (text-only) grounds this for the
+   dominant connector. If another connector (vision-output
+   upstream, anthropic-stub fixture) brings `data:` URLs
+   into scope, that's an additive change on top of v1, not
+   a re-architecture.
 
-   **Update 2026-05-13:** Wintermute is moving to Haiku 4.5
-   (no image-generation capability). Confirms `https://` URLs
-   as the dominant near-term case. Question stands open in
-   case other connectors (anthropic-stub fixtures, openai-
-   compatible upstreams with vision-output models) change
-   the picture.
+2. **No CSP header in v1.** Confirmed, with explicit
+   followup documentation. CSP touches every server-render
+   path (inline styles, SvelteKit hydration scripts,
+   websocket origins, Vite dev-mode injection) and warrants
+   its own audit pass. Filed as **issue #106** (Discovery:
+   Content-Security-Policy headers).
 
-2. **Confirm "no CSP in v1" is acceptable.** The argument
-   for: smaller PR, separate audit. The argument against:
-   the moment images render, the next pen-test will flag the
-   missing CSP header.
+3. **No hostname allowlist in v1.** Confirmed. Broad-trust
+   HTTPS is the right default; agents emit images from many
+   CDNs (GitHub user-content, docs assets, screenshot
+   hosts) that the user wouldn't have pre-listed. "Trust
+   HTTPS, observe, iterate." A future hostname allowlist
+   would most likely land via CSP `img-src` directives
+   (see #106), making it a declarative deployment knob
+   rather than a finn-codebase concern.
 
-3. **Confirm no hostname allowlist in v1.** Trusting all
-   HTTPS hosts is the simplest, broadest contract. A
-   hostname allowlist is also the most user-hostile
-   tightening (agents emit images from CDNs, GitHub
-   user-content, etc., that the user wouldn't have thought
-   to allow). Probably "trust HTTPS, observe, iterate" is
-   right.
+4. **Failure-mode UX: literal markdown text + small error
+   caption.** Confirmed. Consistent with ADR-0022's mermaid
+   fallback and preserves the source for protocol review
+   later.
 
-4. **Confirm the failure-mode UX.** The proposed fallback
-   shows the literal markdown text on broken images.
-   Alternative: show a small generic "broken image"
-   placeholder icon (consistent with browser default,
-   uncluttered). Which is more useful when reviewing the
-   protocol later?
+Multi-agent review pass was offered as an option (Gwen's
+UX/security, Wintermute's agent-output realities) but
+declined as unnecessary for this scope. The design space
+was well-walked at single-agent depth; ADR-0021 keeps
+its `discovery` status pending another genuine multi-agent
+design session.
 
-5. **Status of this ADR after review.** If the four
-   questions above resolve unchanged, this ADR can flip
-   from `discovery` to `accepted` and implementation
-   proceeds as a single PR. If any of them changes the
-   shape (e.g., `data:` URLs in scope), the ADR gets
-   updated before implementation.
+## Companion issues
 
-If a multi-agent review pass is wanted, Gwen's UX/security
-instincts and Wintermute's "what do real agents actually
-emit?" instincts are the relevant inputs (see issue #101's
-suggested process). My read is that the design space is
-well-walked already and a solo review by Jürgen is
-sufficient — but the multi-agent option remains open and
-would also serve as a second confirmation case for ADR-0021
-(promoting it from discovery to accepted).
+Two discovery threads spun off during the review:
+
+- **#105** — paste / upload images in the composer (the
+  user-input half this ADR explicitly does not cover). Will
+  produce its own ADR; the `data:`-URL sanitiser-allowlist
+  change in #105 is layered on top of this ADR's v1.
+
+- **#106** — Content-Security-Policy headers (the
+  belt-and-braces second layer to this ADR's sanitiser-only
+  posture). Will produce its own ADR after the broader
+  audit; this ADR ships before #106 deliberately.
