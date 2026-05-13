@@ -21,6 +21,30 @@ import { marked, Renderer, type Tokens } from 'marked';
 import DOMPurify, { type Config as DOMPurifyConfig } from 'dompurify';
 import type { AgentInfo } from './types';
 
+/* ---------- image rendering policy (ADR-0023) ----------------
+ *
+ * `<img>` was already passing through DOMPurify's defaults (the
+ * tag is on its default allowlist and we never added it to
+ * FORBID_TAGS). What changes with ADR-0023 is the *boundary*:
+ *
+ *   - src must start with `https://` (block http:, data:, blob:,
+ *     and anything else by removing the src attribute when the
+ *     scheme doesn't match -- DOMPurify already blocks
+ *     `javascript:` etc. but we pin the contract here)
+ *   - attributes allowed on <img> are exactly `src, alt, title`
+ *     (no srcset, style, width, height, crossorigin, etc.)
+ *   - every rendered <img> gets `loading="lazy"` and
+ *     `referrerpolicy="no-referrer"` injected post-sanitize
+ *   - load failures (404, CSP block, browser decode error) fall
+ *     back to the literal markdown text as monospace, mirroring
+ *     ADR-0022's mermaid render-failure pattern
+ *
+ * The first three controls live in the DOMPurify hook below.
+ * The fallback handler is attached in `postProcessImages`, which
+ * runs on the same DOM walk that `postProcessMentions` uses --
+ * one walker, two responsibilities.
+ */
+
 /* ---------- marked configuration --------------------------- */
 
 /**
@@ -117,7 +141,13 @@ const SANITIZE_CONFIG: DOMPurifyConfig = {
 	// Allow our mermaid-placeholder data-attribute through the
 	// sanitizer. ADR-0022 §Pipeline relies on this so the renderer
 	// component can discover placeholders post-sanitize.
-	ADD_ATTR: ['data-mermaid-source'],
+	//
+	// The image-fallback attributes (data-img-fallback-src,
+	// data-img-fallback-alt) carry the original markdown source so
+	// the onerror handler can reconstruct the literal `![alt](src)`
+	// text on load failure. They live as data-* so DOMPurify keeps
+	// them by default, but we list them here for audit clarity.
+	ADD_ATTR: ['data-mermaid-source', 'data-img-fallback-src', 'data-img-fallback-alt'],
 	// We never need raw <html>/<body> wrappers; DOMPurify will
 	// honour this. Adds a strict mode for the output.
 	WHOLE_DOCUMENT: false,
@@ -126,20 +156,80 @@ const SANITIZE_CONFIG: DOMPurifyConfig = {
 };
 
 /**
- * Belt-and-suspenders: DOMPurify already blocks `javascript:`
- * URLs and most exotic schemes. We additionally drop `data:` URLs
- * in `href` because we don't render images today (revisit when
- * image embedding becomes a feature). Hook installs once.
+ * Belt-and-suspenders. DOMPurify already blocks `javascript:` /
+ * `vbscript:` URLs and most exotic schemes; the hooks below pin
+ * two additional contracts:
+ *
+ *  1. `<a href="data:...">` is stripped. We don't render images
+ *     today's user-pasted via `<a>`, and bare `data:` links in
+ *     bubble bodies are almost always confusable surfaces.
+ *  2. `<img src>` is restricted to `https://` per ADR-0023 §2.
+ *     Anything else (http:, data:, blob:, file:, etc.) gets the
+ *     src attribute removed, leaving an alt-only `<img>` that
+ *     the browser renders as the alt text. The `data-img-
+ *     fallback-*` attributes carry the original markdown source
+ *     so the post-process step can render a literal-text
+ *     fallback even when src is intact (load-time failure path).
+ *  3. `<img>` attributes are narrowed to `src, alt, title` only.
+ *     Anything else (srcset, style, width, height, crossorigin,
+ *     decoding, fetchpriority, ...) is removed. This is the
+ *     ADR-0023 §5 attribute-allowlist guarantee.
+ *
+ * Hook installs once.
  */
+const IMG_ALLOWED_ATTRS = new Set(['src', 'alt', 'title']);
+
 let hooksInstalled = false;
 function installHooksOnce(): void {
 	if (hooksInstalled) return;
 	hooksInstalled = true;
 	DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 		if (!(node instanceof Element)) return;
-		const href = node.getAttribute('href');
-		if (href && /^data:/i.test(href.trim())) {
-			node.removeAttribute('href');
+
+		// <a href="data:..."> stripping (kept from ADR-0016).
+		if (node.tagName === 'A') {
+			const href = node.getAttribute('href');
+			if (href && /^data:/i.test(href.trim())) {
+				node.removeAttribute('href');
+			}
+		}
+
+		// <img> scheme + attribute discipline (ADR-0023).
+		if (node.tagName === 'IMG') {
+			const img = node as HTMLImageElement;
+			const src = img.getAttribute('src')?.trim() ?? '';
+			const alt = img.getAttribute('alt') ?? '';
+
+			// Stash the original (alt, src) for the load-failure
+			// fallback. Done before the scheme check because we want
+			// the literal text even when src was an http:// link the
+			// user might want to see in the bubble for debugging.
+			img.setAttribute('data-img-fallback-src', src);
+			img.setAttribute('data-img-fallback-alt', alt);
+
+			// Drop src if scheme isn't https://. Leaving the <img>
+			// with only alt+fallback-data renders as alt-text in
+			// browsers (existing accessibility behaviour), and the
+			// post-process step will replace it with the literal
+			// markdown text per ADR-0023 §4.
+			if (!/^https:\/\//i.test(src)) {
+				img.removeAttribute('src');
+			}
+
+			// Narrow attribute set. Walk the live NamedNodeMap by
+			// snapshotting names first; removeAttribute during
+			// iteration would skip entries.
+			const attrNames: string[] = [];
+			for (let i = 0; i < img.attributes.length; i++) {
+				attrNames.push(img.attributes[i]!.name);
+			}
+			for (const name of attrNames) {
+				const lower = name.toLowerCase();
+				if (IMG_ALLOWED_ATTRS.has(lower)) continue;
+				if (lower === 'data-img-fallback-src') continue;
+				if (lower === 'data-img-fallback-alt') continue;
+				img.removeAttribute(name);
+			}
 		}
 	});
 }

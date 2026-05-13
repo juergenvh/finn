@@ -669,10 +669,38 @@ HTML labels, which means **no automatic text wrapping inside
 node labels**; long labels overflow visually. Use `<br>` or
 multiple short labels if wrap-shaped output matters.
 
+**Images.** Agents that emit standard markdown image syntax
+(`![alt](https://...)`) get rendered as actual `<img>` elements
+in the bubble. The render path is sanitised per ADR-0023:
+
+- Only `https://` URLs are loaded. Other schemes (`http:`,
+  `data:`, `file:`, `blob:`, etc.) have their `src` attribute
+  stripped and the bubble shows the literal markdown text with
+  a small "image failed to load" caption instead. Connector
+  authors should ensure their image references use HTTPS.
+- Allowed attributes on rendered images: `src`, `alt`, `title`
+  only. Anything else (`srcset`, `style`, `width`, `height`,
+  inline event handlers) is stripped. Use `alt` for text the
+  user will see if the image doesn't load.
+- Privacy hardening injected automatically: every rendered
+  image gets `loading="lazy"` (off-screen images don't fetch
+  until scrolled into view) and `referrerpolicy="no-referrer"`
+  (the third-party origin doesn't see which finn page made the
+  request).
+- Load failures (404, CSP block, decode error) fall back to
+  the same literal-markdown caption pattern.
+
+Composer-side image input (paste / upload from the user's
+side) is deliberately out of scope today; see issue #105.
+Content-Security-Policy headers as a second defence layer
+are also deferred; see issue #106.
+
 See [`docs/decisions/0016-rich-rendering.md`](decisions/0016-rich-rendering.md)
-for the full sanitiser policy and
+for the full sanitiser policy,
 [`docs/decisions/0022-mermaid-rendering.md`](decisions/0022-mermaid-rendering.md)
-for the Mermaid-specific pipeline and security rationale.
+for the Mermaid-specific pipeline, and
+[`docs/decisions/0023-image-rendering.md`](decisions/0023-image-rendering.md)
+for the image-rendering pipeline and security rationale.
 
 ## Routing modes (where the connectors get called from)
 
