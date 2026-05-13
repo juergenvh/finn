@@ -33,7 +33,11 @@ docs/
     ├── 0015-auto-approve-channels.md
     ├── 0016-rich-rendering.md
     ├── 0017-agent-bound-session-override.md
-    └── 0018-agent-name-in-bubble-header.md
+    ├── 0018-agent-name-in-bubble-header.md
+    ├── 0019-settings-surface.md
+    ├── 0020-roundtrip-cap.md
+    ├── 0021-multi-agent-channel-initiation.md
+    └── 0022-mermaid-rendering.md
 ```
 
 ## Decisions (ADRs)
@@ -74,6 +78,10 @@ across the project (not per-area).
 | 0016 | Rich rendering for message bubbles                     | markdown bodies (`marked` + `DOMPurify`, GFM + soft breaks), uniform for user and agent bubbles, no syntax highlighter in phase 1, mention post-process, ResizeObserver scroll discipline, always-on footer. Issue #1. |
 | 0017 | Agent-bound session override                           | optional `session_override` field on the OpenClaw connector config. Pins an agent to a named upstream session (e.g. `finn`, `sagesmith`) regardless of which finn channel it's used in. Multi-session = multi-agent-row, by design. **Accepted, shipped via #65 + #66.** |
 | 0018 | Agent name in message-bubble header                    | bubble header shows agent name + optional session badge (only when ADR-0017 override is set) + disclosure caret for connector / session-key debugging info. Default behaviour unchanged for agents without override. **Accepted, shipped via #67 + #68 (members-endpoint fix).** |
+| 0019 | Settings surface: global defaults + per-channel overrides | `/settings` route with two-pane shape (global form + per-channel list). Effective values resolve per-key with explicit precedence, `null` clears an override. Initial keys: KB budget, auto-approve, roundtrip cap, default-channel-id. **Accepted, shipped via #71 + #72 + #73 + #74 + #75.** |
+| 0020 | Per-channel roundtrip cap                              | hard ceiling on hop count per user-turn-window to bound runaway multi-agent loops. Pre-consumed at dispatch, audit-row emitted on cap-trip with empty `targets[]` and a system-event note. ADR-0015 §5a is what this ships. **Accepted, shipped via #76.** |
+| 0021 | Multi-agent channel initiation patterns                | four structural elements for producing convergent multi-agent design output: setup-prompt (mode + topology + constraint), anstoss-prompt (topic + output + quality forcing functions), explicit hop-1 role distribution, roundtrip cap as quality constraint. Discovery ADR; four implementation options sketched, current vote is Option B (per-channel `initiation_template` field). Promote on second confirming session. **Status: discovery.** |
+| 0022 | Mermaid diagram rendering in message bubbles           | fenced `mermaid` blocks render as SVG diagrams in agent and user bubbles. Three-layer sanitiser (pre-escape label content, `securityLevel: 'strict'` with `htmlLabels: false`, post-render DOMPurify with explicit SVG allowlist). Lazy-loaded mermaid bundle, in-memory cache keyed `(source, theme, version)`. Plain-while-streaming, finalised on `message_end` with 150 ms fade. Issue #80. **Accepted, shipped via #102.** |
 
 ## Setup guides
 

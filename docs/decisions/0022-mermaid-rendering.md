@@ -1,16 +1,17 @@
 # ADR 0022 — Mermaid diagram rendering in message bubbles
 
-- **Status:** accepted
+- **Status:** accepted (shipped 2026-05-13)
 - **Date:** 2026-05-12
+- **Shipped via:** #102
 - **Deciders:** Jürgen, Dixie (concept developed in a multi-agent
   design session with Wintermute and Gwen on 2026-05-11; see
   ADR-0021 process notes)
-- **Related:** ADR-0016 (rich rendering — deferred Mermaid),
-  ADR-0001 (connector trust model — informs the three-layer
-  sanitizer posture), ADR-0013 (streaming + scroll discipline —
-  informs the streaming/`message_end` switch), ADR-0021 (the
-  multi-agent initiation pattern that produced this concept),
-  issue #80.
+- **Related:** ADR-0016 (rich rendering — deferred Mermaid;
+  promise redeemed by this ADR), ADR-0001 (connector trust
+  model — informs the three-layer sanitizer posture), ADR-0013
+  (streaming + scroll discipline — informs the streaming /
+  `message_end` switch), ADR-0021 (the multi-agent initiation
+  pattern that produced this concept), issue #80.
 
 ## Context
 
@@ -243,3 +244,53 @@ Optional follow-up (separate PR):
 - **Fade-transition implementation.** `<Transition>` from
   Svelte's built-ins, or a manual CSS-class swap? Probably the
   latter is simpler; implementer's call during the PR.
+
+## Implementation notes (post-merge, 2026-05-13)
+
+Landing observations from PR #102 worth pinning for future
+readers before they’re lost to commit-message archaeology:
+
+- **Placeholder strategy.** The marked-renderer override emits
+  `<pre data-mermaid-source="<base64>" class="mermaid-placeholder">
+  <code>{escaped source}</code></pre>`. DOMPurify is configured
+  with `ADD_ATTR: ['data-mermaid-source']` so the attribute
+  survives sanitisation. The `<code>` body is the fallback
+  render path (visible during streaming, on SSR pre-hydration,
+  and on render failure).
+- **Base64 payload, not URL-encoding.** Cheap roundtrip via
+  `Buffer.from(s, 'utf-8').toString('base64')` on the server,
+  `btoa(unescape(encodeURIComponent(s)))` in the browser.
+  Robust against any future sanitiser hook that might inspect
+  URL-like patterns in attributes.
+- **No per-block Svelte component.** Initially planned as
+  `MermaidBlock.svelte`. Rejected because `{@html ...}`
+  injection makes per-block component instantiation awkward
+  (manual mount, no declarative tree). A pure imperative
+  `mountMermaidBlocks(rootEl)` function is idempotent via a
+  `data-mermaid-mounted` marker on the placeholder and slots
+  cleanly into a `$effect` in `MessageBubble.svelte`.
+- **Renderer testability.** `tests/unit/markdown-mermaid.test.ts`
+  verifies the renderer interception in isolation (six tests:
+  placeholder shape, fallback escape, non-mermaid passthrough,
+  case-insensitivity, Unicode roundtrip, empty body). The full
+  pipeline through DOMPurify would require a window provider
+  (jsdom) the vitest config doesn’t set up today; the
+  isolation level matches what the existing vitest suite uses
+  elsewhere. A browser smoke spec is still the right gate for
+  the SVG-mount step — see the **Optional follow-up** note in
+  Implementation phasing.
+- **Bundle confirmed lazy.** Production build emits the
+  Mermaid chunk as a separate ~590 KB file, loaded only when a
+  message bubble first mounts a diagram. Channels that never
+  see a diagram pay zero bundle cost.
+- **No `htmlLabels` exception today.** `securityLevel: 'strict'`
+  remains in force; long node labels overflow visually as
+  warned in §Decision. Will revisit only on real user
+  feedback per the phase-2 note.
+- **Three-layer sanitiser pattern reused-ready.** The pattern
+  (pre-escape → library-internal strict → post-DOMPurify
+  allowlist) is now a concrete worked example in the codebase
+  for whoever ships image rendering (#101) or any other
+  untrusted-content-as-DOM render path. The SVG allowlist
+  itself lives in `src/lib/ui/mermaid.ts` so it can be
+  audited in one place.

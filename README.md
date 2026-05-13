@@ -444,6 +444,18 @@ In ascending order of integration weight:
     leaves the user alone when they scrolled up to read
     history. Replaces the per-event scroll triggers from
     earlier PRs. ADR-0016 §8.
+17. **Mermaid diagrams in bubbles** ✓ — fenced code blocks
+    tagged `mermaid` render as SVG diagrams instead of plain
+    monospace source. Three-layer sanitiser (label pre-escape,
+    Mermaid `securityLevel: 'strict'` with `htmlLabels: false`,
+    post-render DOMPurify with an explicit SVG allowlist).
+    Mermaid bundle is dynamic-imported on first diagram mount,
+    so channels that never see a diagram pay zero bundle cost.
+    In-memory SVG cache keyed `(source, theme, mermaidVersion)`.
+    Plain-while-streaming — the SVG render lands at
+    `message_end` with a 150 ms fade transition. Parse / render
+    failures fall back to a monospace source block with a small
+    inline error caption. ADR-0022, issue #80.
 
 ## What this is **not** doing
 
