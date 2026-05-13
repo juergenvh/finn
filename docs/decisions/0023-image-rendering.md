@@ -33,12 +33,27 @@ are substantively different from diagram rendering:
   different storage, performance, and privacy implications.
 
 Today: agents that emit `![alt](https://example.com/cat.png)`
-get the markdown rendered as a literal `<a>` link (because
-`<img>` isn't on the DOMPurify allowlist and `data:` is
-explicitly stripped from `href`). Goal: render the image,
-without opening tracking-pixel / phishing / mixed-content
-holes that the current "block everything" posture protects
-against.
+actually *did* render as `<img>`, because DOMPurify's default
+allowlist already includes the tag and `markdown.ts` did not
+add it to `FORBID_TAGS`. The existing comment in `markdown.ts`
+about "we don't render images today" referred specifically to
+the `<a href="data:...">` stripping, not to `<img>`. **What
+was missing was the hardening:** no scheme filter, no
+attribute discipline, no `loading="lazy"`, no
+`referrerpolicy`, no failure fallback.
+
+(Discovered during implementation walk on 2026-05-13: the
+ADR's original Context paragraph mis-characterised the
+existing render behaviour. The goal below is unchanged —
+delivering safe image rendering — but the work is more
+"harden existing behaviour" than "unblock new behaviour".
+Flagged here rather than rewriting the ADR after the fact;
+the rest of the design §s hold against the corrected
+baseline.)
+
+Goal: render the image safely, without opening tracking-pixel
+/ phishing / mixed-content holes that the existing "DOMPurify
+defaults" posture leaves unaddressed.
 
 This ADR walks issue #101's seven open questions, proposes
 v1 pinned answers with rationale, and flags the questions

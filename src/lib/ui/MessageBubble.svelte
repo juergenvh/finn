@@ -2,6 +2,7 @@
 	import { tick } from 'svelte';
 	import { renderMarkdown } from './markdown';
 	import { mountMermaidBlocks, installThemeListener } from './mermaid';
+	import { mountImages } from './images';
 	import type { AgentInfo, ApprovalSnapshot, TokenUsage } from './types';
 
 	type Props = {
@@ -227,8 +228,13 @@
 		if (!bodyEl) return;
 		if (renderedBody === null) return;
 		installThemeListener();
-		// Wait for the {@html ...} commit, then mount.
-		void tick().then(() => mountMermaidBlocks(bodyEl));
+		// Wait for the {@html ...} commit, then mount mermaid +
+		// images. Both are idempotent (data-*-mounted markers)
+		// so re-runs on the same body do nothing.
+		void tick().then(() => {
+			mountMermaidBlocks(bodyEl);
+			mountImages(bodyEl);
+		});
 	});
 
 	/* Always-on footer for agent bubbles (ADR-0016 §9).
@@ -1078,6 +1084,45 @@
 		height: auto;
 		display: block;
 		margin: 0 auto;
+	}
+
+	/* Image rendering (ADR-0023). Sizing matches the mermaid
+	 * container shape: max-width keeps small images at their
+	 * native size, overflow-x on the bubble row handles the
+	 * extreme-width case via the existing pre-wrap behaviour
+	 * elsewhere. */
+	.body-rich :global(img) {
+		max-width: 100%;
+		height: auto;
+		display: block;
+		margin: 0.4em 0;
+		border-radius: 4px;
+	}
+
+	/* Fallback shown when an image load fails (404, CSP block,
+	 * scheme dropped by the sanitiser, browser decode error).
+	 * ADR-0023 §4: literal markdown text in monospace plus a
+	 * small "image failed to load" caption underneath. */
+	.body-rich :global(.image-fallback) {
+		display: inline-flex;
+		flex-direction: column;
+		gap: 0.2em;
+		margin: 0.4em 0;
+		padding: 0.4em 0.6em;
+		border-radius: 4px;
+		background: rgba(0, 0, 0, 0.18);
+		max-width: 100%;
+	}
+	.body-rich :global(.image-fallback .image-fallback-source) {
+		word-break: break-all;
+		font-family: var(--font-mono, ui-monospace, monospace);
+		font-size: 0.78rem;
+		background: transparent;
+		padding: 0;
+	}
+	.body-rich :global(.image-fallback .image-error-caption) {
+		font-size: 0.7rem;
+		color: #fca5a5;
 	}
 
 	/* Inline error caption shown when Mermaid parse / render fails.
