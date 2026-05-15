@@ -189,10 +189,6 @@ type ChatMessage = {
 	content: string;
 };
 
-const SYSTEM_PROMPT =
-	"You are an assistant being addressed through 'finn', a multi-agent " +
-	'chat router. Reply concisely; the user is testing channel plumbing.';
-
 export type OpenclawStreamArgs = {
 	channelId: string;
 	body: string;
@@ -223,10 +219,7 @@ async function* streamReply(
 	const { base_url: baseUrl, model, token_env_var: tokenEnvVar } = args.config;
 	const apiKey = process.env[tokenEnvVar] ?? '';
 
-	const messages: ChatMessage[] = [
-		{ role: 'system', content: SYSTEM_PROMPT },
-		{ role: 'user', content: args.body }
-	];
+	const messages: ChatMessage[] = [{ role: 'user', content: args.body }];
 
 	const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
 

@@ -39,10 +39,6 @@ type ChatMessage = {
 	content: string;
 };
 
-const SYSTEM_PROMPT =
-	"You are an assistant being addressed through 'finn', a multi-agent " +
-	'chat router. Reply concisely; the user is testing channel plumbing.';
-
 export type OpenAICompatibleStreamArgs = {
 	channelId: string;
 	body: string;
@@ -80,10 +76,7 @@ async function* streamReply(
 	} = args.config;
 	const apiKey = process.env[tokenEnvVar] ?? '';
 
-	const messages: ChatMessage[] = [
-		{ role: 'system', content: SYSTEM_PROMPT },
-		{ role: 'user', content: args.body }
-	];
+	const messages: ChatMessage[] = [{ role: 'user', content: args.body }];
 
 	const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
 
