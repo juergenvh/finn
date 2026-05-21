@@ -381,9 +381,21 @@
 				`channel ${channelId} fetch failed: ${msgRes.status}/${memRes.status}/${apprRes.status}`
 			);
 		}
+		type InflightFromServer = {
+			id: string;
+			channelId: string;
+			senderType: 'agent';
+			senderId: string;
+			body: string;
+			createdAt: number;
+			status: 'streaming' | 'error';
+			errorMessage: string | null;
+		};
+
 		const msgData = (await msgRes.json()) as {
 			messages: DBMessage[];
 			has_more?: boolean;
+			inflight?: InflightFromServer[];
 		};
 		const memData = (await memRes.json()) as { members: AgentInfo[] };
 		const apprData = (await apprRes.json()) as { approvals: ApprovalSnapshot[] };
@@ -400,6 +412,44 @@
 			error: null,
 			tokens: decodeTokens(m.tokensJson)
 		}));
+
+		// Inflight bubbles ride along on the initial load (issue
+		// #112). Same bubble component renders them; the `streaming`
+		// flag re-enables the live-cursor + waiting-indicator UI.
+		// `error` rows surface the failure inline, matching the
+		// behaviour of a mid-stream `message_error` event.
+		//
+		// Critically we also register the inflight ids in
+		// `streamingChannelById` so any *continuing* WS events for
+		// the same stream (delta/end/error from the still-running
+		// server-side loop) reconcile onto the existing bubble rather
+		// than being dropped as unknown-id.
+		//
+		// Accepted approximation: there is a small gap between the
+		// last server-side throttled flush (every ~500 ms, see
+		// inflight-writer.ts) and the next live delta a reconnecting
+		// client receives. Any deltas the server broadcast *during*
+		// the client's absence are simply lost — we render the last
+		// flush snapshot, then resume live appending from the next
+		// delta forward. This is the issue #112 "Option A" trade-off;
+		// closing the gap fully needs B (per-client ack + replay).
+		for (const inf of msgData.inflight ?? []) {
+			ui.push({
+				id: inf.id,
+				channelId: inf.channelId,
+				sender: 'agent',
+				senderId: inf.senderId,
+				body: inf.body,
+				hiddenAt: null,
+				ts: inf.createdAt,
+				streaming: inf.status === 'streaming',
+				error: inf.status === 'error' ? inf.errorMessage : null,
+				tokens: null
+			});
+			if (inf.status === 'streaming') {
+				streamingChannelById[inf.id] = inf.channelId;
+			}
+		}
 		messagesByChannel = { ...messagesByChannel, [channelId]: ui };
 		oldestLoadedTs = {
 			...oldestLoadedTs,

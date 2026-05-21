@@ -37,6 +37,7 @@ import { agents, channelMembers, channels } from '../db/schema.ts';
 import { newId } from '../db/ids.ts';
 import { parseAgentConfig } from '../db/agent-config.ts';
 import { extractMentions, resolveMentionedAgents } from '../mentions.ts';
+import { InflightWriter } from '../inflight-writer.ts';
 import { openclawConnector } from './openclaw.ts';
 import { openAICompatibleConnector } from './openai-compatible.ts';
 import { anthropicStubConnector } from './anthropic-stub.ts';
@@ -269,6 +270,25 @@ async function streamOneAgent(
 
 	let fullBody = '';
 	let tokens: UsageReport | null = null;
+
+	// Open an inflight checkpoint row before the first delta arrives
+	// (issue #112). A client reconnecting between `message_start`
+	// and the first delta then still sees a `streaming` row in the
+	// channel-fetch result instead of an empty space. The writer
+	// throttles updates internally so this is cheap.
+	const inflight = new InflightWriter(messageId, channelId, agent.id, startedAt);
+	try {
+		inflight.start();
+	} catch (err) {
+		// Writer is best-effort. If the DB rejects the insert (e.g.
+		// FK constraint because of a race with channel/agent
+		// soft-delete) we log and continue — the stream itself is
+		// what the user is waiting for, recovery is a polish layer.
+		console.error(
+			`[inflight-writer] start failed for ${messageId}: ${(err as Error).message}`
+		);
+	}
+
 	try {
 		const stream = streamConnector(agent, channelId, body);
 		for await (const event of stream) {
@@ -276,6 +296,7 @@ async function streamOneAgent(
 				if (event.text.length === 0) continue;
 				fullBody += event.text;
 				emit({ type: 'message_delta', id: messageId, delta: event.text });
+				inflight.appendDelta(event.text);
 			} else if (event.kind === 'usage') {
 				// At-most-once per stream by parser contract; if a
 				// pathological backend ever emits it twice, last
@@ -295,10 +316,29 @@ async function streamOneAgent(
 			body: fullBody,
 			tokens: tokens ?? undefined
 		});
+		// Stream succeeded — the caller will write the final row to
+		// `messages` via `recordAgentMessage`; we drop the inflight
+		// mirror. Doing this before returning ensures the row is
+		// gone by the time the next channel-fetch reads `messages`
+		// (single-writer SQLite serialises the two).
+		try {
+			inflight.finalizeOk();
+		} catch (err) {
+			console.error(
+				`[inflight-writer] finalizeOk failed for ${messageId}: ${(err as Error).message}`
+			);
+		}
 		return { agentId: agent.id, messageId, body: fullBody, tokens };
 	} catch (err) {
 		const error = (err as Error).message ?? String(err);
 		emit({ type: 'message_error', id: messageId, error });
+		try {
+			inflight.finalizeError(error);
+		} catch (innerErr) {
+			console.error(
+				`[inflight-writer] finalizeError failed for ${messageId}: ${(innerErr as Error).message}`
+			);
+		}
 		return { agentId: agent.id, messageId, error };
 	}
 }

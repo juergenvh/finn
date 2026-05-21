@@ -228,6 +228,69 @@ export const settingsChannel = sqliteTable('settings_channel', {
 	updatedAt: integer('updated_at').notNull()
 });
 
+/* ---------------------------------------------------------- inflight */
+
+/**
+ * Partial-body checkpoints for streams that are currently running
+ * (issue #112).
+ *
+ * This is a **transient mirror** of in-flight agent replies, not
+ * part of the audit trail. A row exists only while the upstream
+ * provider is still emitting deltas. When the stream terminates:
+ *
+ *   - on clean completion (`message_end`): the row is deleted and
+ *     the final body is written to `messages` via the existing
+ *     `recordAgentMessage` path. The audit trail in `messages`
+ *     stays append-only — ADR-0004 invariant intact.
+ *   - on stream error: the row is updated to `status = 'error'`
+ *     with the error string in `body`, then a normal
+ *     `recordAgentMessage` writes an `[error: …]` body too, then
+ *     the inflight row is deleted. Operators investigating a
+ *     failure see both the partial body that was streaming and
+ *     the final error message.
+ *   - on operator restart with stale rows: a startup sweep marks
+ *     them as `status = 'error'` with reason `interrupted_by_restart`,
+ *     then they live on for the next channel-fetch so the client
+ *     can show what happened, after which a follow-up sweep drops
+ *     them.
+ *
+ * The protocol viewer (`/protocol`) does **not** read this table.
+ * Inflight rows are channel-view only.
+ */
+export const inflightMessages = sqliteTable('inflight_messages', {
+	/** Same id space as `messages.id`. When the stream ends cleanly,
+	 * `recordAgentMessage` is called with this same id, so the
+	 * bubble identity survives the inflight → messages promotion
+	 * without the client having to remap. */
+	id: text('id').primaryKey(),
+	channelId: text('channel_id')
+		.notNull()
+		.references(() => channels.id),
+	agentId: text('agent_id')
+		.notNull()
+		.references(() => agents.id),
+	/** Partial body. Updated on every flush (see
+	 * `inflight-writer.ts`). When `status = 'error'`, this column
+	 * holds the partial body that had arrived before the failure;
+	 * the error string itself lives in `errorMessage`. */
+	body: text('body').notNull().default(''),
+	/** State machine. `streaming` = upstream still emitting,
+	 * `error` = stream failed (terminal, will be swept).
+	 * No `complete` state — successful completion deletes the row
+	 * rather than updating it. */
+	status: text('status', { enum: ['streaming', 'error'] }).notNull().default('streaming'),
+	/** Populated only when `status = 'error'`. */
+	errorMessage: text('error_message'),
+	/** Unix-ms of the original `message_start`. The bubble shows
+	 * this as its timestamp so the channel order is stable across
+	 * the inflight → messages promotion. */
+	createdAt: integer('created_at').notNull(),
+	/** Updated on every flush. Used by the startup sweep to detect
+	 * rows that are too stale to be live anymore (e.g. server
+	 * restarted mid-stream). */
+	updatedAt: integer('updated_at').notNull()
+});
+
 /* ------------------------------------------------------------------ types */
 
 export type Agent = typeof agents.$inferSelect;
@@ -242,3 +305,5 @@ export type SettingsGlobal = typeof settingsGlobal.$inferSelect;
 export type NewSettingsGlobal = typeof settingsGlobal.$inferInsert;
 export type SettingsChannel = typeof settingsChannel.$inferSelect;
 export type NewSettingsChannel = typeof settingsChannel.$inferInsert;
+export type InflightMessage = typeof inflightMessages.$inferSelect;
+export type NewInflightMessage = typeof inflightMessages.$inferInsert;

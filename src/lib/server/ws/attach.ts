@@ -42,6 +42,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
+import { sweepStaleInflightOnBoot } from '../inflight-writer.ts';
 
 const WS_PATH = '/ws';
 
@@ -263,6 +264,18 @@ export function attachWebSocketServer(httpServer: UpgradableHttpServer, hooks: F
 	if (attached) {
 		// Vite HMR can re-import this file. Re-attaching would leak handlers.
 		return attached;
+	}
+
+	// Mark any in-flight rows left over from a previous process run
+	// as `interrupted_by_restart` so a returning client sees the
+	// failure explicitly instead of an eternally-streaming bubble
+	// (issue #112). Synchronous + safe to call before accepting
+	// connections; idempotent across HMR thanks to the
+	// `attached`-guard above.
+	try {
+		sweepStaleInflightOnBoot();
+	} catch (err) {
+		console.error(`[inflight-writer] boot sweep failed: ${(err as Error).message}`);
 	}
 
 	const wss = new WebSocketServer({ noServer: true });
