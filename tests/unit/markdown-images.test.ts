@@ -33,9 +33,15 @@ const IMG_ALLOWED_ATTRS = new Set(['src', 'alt', 'title']);
 type Sanitizer = ReturnType<typeof createDOMPurify>;
 let dp: Sanitizer;
 
+// Mirrors the config in src/lib/ui/markdown.ts. The image
+// behaviour we test here doesn't depend on `target` handling
+// (no <img target> in our markup), so keeping `FORBID_ATTR: []`
+// here matches the production config without changing what these
+// tests exercise. Link-target injection is covered separately in
+// `markdown-links.test.ts`.
 const CONFIG = {
 	FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'style', 'link'],
-	FORBID_ATTR: ['target'],
+	FORBID_ATTR: [] as string[],
 	ADD_ATTR: ['data-mermaid-source', 'data-img-fallback-src', 'data-img-fallback-alt']
 };
 

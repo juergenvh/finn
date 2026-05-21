@@ -133,11 +133,17 @@ const SANITIZE_CONFIG: DOMPurifyConfig = {
 	// Forbid these even though most are off by default — pin the
 	// contract for clarity and survival across DOMPurify upgrades.
 	FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'style', 'link'],
-	// Strip target attribute on links (open-in-place; revisit on
-	// real user feedback). Inline event handlers and dangerous URL
-	// schemes are handled by DOMPurify's defaults plus our hook
-	// below.
-	FORBID_ATTR: ['target'],
+	// We used to strip `target` outright (open-in-place) but real
+	// user feedback flipped that: clicking a link in a bubble while
+	// an agent is streaming throws away the running reply. The hook
+	// below now *injects* `target="_blank"` + `rel="noopener
+	// noreferrer"` on every absolute-scheme `<a>`. In-page anchors
+	// (`#section`) keep the in-place navigation.
+	//
+	// Inline event handlers and dangerous URL schemes are still
+	// handled by DOMPurify's defaults plus our `<a href="data:">`
+	// strip below.
+	FORBID_ATTR: [],
 	// Allow our mermaid-placeholder data-attribute through the
 	// sanitizer. ADR-0022 §Pipeline relies on this so the renderer
 	// component can discover placeholders post-sanitize.
@@ -186,11 +192,29 @@ function installHooksOnce(): void {
 	DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 		if (!(node instanceof Element)) return;
 
-		// <a href="data:..."> stripping (kept from ADR-0016).
+		// <a> policy (kept-from-ADR-0016 plus 2026-05-21 update):
+		//
+		//   - `href="data:..."` is stripped (confusable surface,
+		//     never useful in a chat bubble).
+		//   - Links with an absolute scheme (https://, http://,
+		//     mailto:, etc.) get `target="_blank"` +
+		//     `rel="noopener noreferrer"` so clicking them doesn't
+		//     tear down the current finn session (which may be
+		//     mid-stream on a long agent reply). Hash-only and
+		//     same-document relative links keep in-place navigation.
+		//   - The author can't override either decision because
+		//     `marked` doesn't emit `target` from markdown syntax,
+		//     and any literal HTML `target=...` already gets caught
+		//     by DOMPurify's default sanitizer pass on script-y
+		//     attributes. We re-set both attributes here
+		//     unconditionally for clarity.
 		if (node.tagName === 'A') {
-			const href = node.getAttribute('href');
-			if (href && /^data:/i.test(href.trim())) {
+			const href = node.getAttribute('href')?.trim() ?? '';
+			if (/^data:/i.test(href)) {
 				node.removeAttribute('href');
+			} else if (href.length > 0 && !href.startsWith('#')) {
+				node.setAttribute('target', '_blank');
+				node.setAttribute('rel', 'noopener noreferrer');
 			}
 		}
 
