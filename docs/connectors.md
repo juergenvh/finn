@@ -181,6 +181,26 @@ Wintermute (see its `docs/OPENAI-COMPAT.md`), Open WebUI, LobeChat
 in proxy mode, vLLM, llama.cpp's HTTP server, anything else with an
 OpenAI-compatible facade.
 
+If you publish that backend behind Nginx Proxy Manager or another
+reverse proxy, expose only the `/v1` subtree to `finn`. `finn` never
+calls the backend root path `/`; it talks to `POST /v1/chat/completions`
+and `GET /v1/models`. Keeping `/` unexposed avoids serving a human UI
+or generic landing page where the API is expected.
+
+If you want the proxy to stay usable for the browser while still
+blocking accidental UI access at the public hostname, keep the
+reverse proxy host pointed at the backend and add an exact-root
+override such as:
+
+```nginx
+location = / {
+  return 404;
+}
+```
+
+That leaves `/v1/*` available for finn and makes a stray visit to the
+hostname fail fast instead of landing on the upstream UI.
+
 - finn agent: `connector_type: openai-compatible`
 - finn agent `base_url`: the backend's `/v1` URL
   (e.g. `https://agent.your-domain.example/v1`).
