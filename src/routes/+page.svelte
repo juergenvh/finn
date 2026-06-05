@@ -108,7 +108,22 @@
 
 	/* ---------- composer ---------- */
 
-	let draft = $state('');
+	/** Per-channel draft storage. The `draft` derived below exposes
+	 * the active channel's entry as a simple read/write surface so
+	 * the rest of the component doesn't need to know about the map.
+	 * Drafts are ephemeral — they live only for the lifetime of the
+	 * tab (no localStorage persistence, per issue #114 scope). */
+	let draftsByChannel = $state<Record<string, string>>({});
+	const draft = {
+		get value() {
+			return activeChannelId ? (draftsByChannel[activeChannelId] ?? '') : '';
+		},
+		set value(v: string) {
+			if (activeChannelId) {
+				draftsByChannel = { ...draftsByChannel, [activeChannelId]: v };
+			}
+		}
+	};
 	let composer: HTMLTextAreaElement | null = $state(null);
 
 	/* ---------- mention autocomplete ---------- */
@@ -823,7 +838,7 @@
 		const after = value.slice(caret);
 		const inserted = `@${agent.name} `;
 		const newValue = before + inserted + after;
-		draft = newValue;
+		draft.value = newValue;
 		mentionCtx = null;
 		const nextCaret = before.length + inserted.length;
 		queueMicrotask(() => {
@@ -835,10 +850,10 @@
 	/* ---------- sending + decisions ---------- */
 
 	function send() {
-		const body = draft.trim();
+		const body = draft.value.trim();
 		if (!body || !ws || ws.readyState !== WebSocket.OPEN || !activeChannelId) return;
 		ws.send(JSON.stringify({ type: 'user_message', channel_id: activeChannelId, body }));
-		draft = '';
+		draft.value = '';
 		mentionCtx = null;
 		// After clearing draft, shrink the textarea back to its base
 		// height instead of staying expanded from the previous message.
@@ -980,7 +995,8 @@
 	function pickChannel(id: string) {
 		activeChannelId = id;
 		openMenu = null;
-		// Reset search and scroll state per channel.
+		// Reset mention autocomplete and search state per channel.
+		mentionCtx = null;
 		searchQuery = '';
 		searchHits = [];
 		// Persist last-active so returning from /settings (or a
@@ -1071,6 +1087,10 @@
 			alert(`failed: ${res.status}`);
 			return;
 		}
+		// Clean up the draft entry so it doesn't linger in the map
+		// after the channel is gone (memory hygiene, issue #114).
+		const { [channelId]: _, ...rest } = draftsByChannel;
+		draftsByChannel = rest;
 		openMenu = null;
 	}
 
@@ -1531,7 +1551,7 @@
 				/>
 				<textarea
 					bind:this={composer}
-					bind:value={draft}
+					bind:value={draft.value}
 					oninput={onComposerInput}
 					onkeydown={onComposerKey}
 					placeholder="message — Enter to send, @-mentions become approval defaults"
