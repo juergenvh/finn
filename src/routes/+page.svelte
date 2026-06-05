@@ -92,6 +92,11 @@
 	 * the map itself — it's strictly a routing index.
 	 */
 	const streamingChannelById: Record<string, string> = {};
+	/** IDs that came from the inflight_messages table (not regular messages).
+	 * Used by the dismiss handler to route to DELETE /api/inflight-messages/:id
+	 * instead of PATCH /api/messages/:id/visibility (which would 404).
+	 * Bug #118 fix. */
+	const inflightIds = new Set<string>();
 	let approvalsByMessage = $state<Record<string, ApprovalSnapshot>>({});
 	/** Per channel: timestamp of the OLDEST message we have loaded.
 	 * Used to fire 'load older' fetches with a `before=` cursor. */
@@ -433,24 +438,32 @@
 		// flush snapshot, then resume live appending from the next
 		// delta forward. This is the issue #112 "Option A" trade-off;
 		// closing the gap fully needs B (per-client ack + replay).
+		//
+		// Bug #118 fix: inflight rows are merged into the full message
+		// list and sorted by ts rather than unconditionally appended.
+		// The server-side sort (ascending createdAt) is still correct
+		// for deduplication, but client correctness no longer depends
+		// on inflight rows always being newer than regular messages.
+		const inflightMapped: UIMessage[] = (msgData.inflight ?? []).map((inf) => ({
+			id: inf.id,
+			channelId: inf.channelId,
+			sender: 'agent' as const,
+			senderId: inf.senderId,
+			body: inf.body,
+			hiddenAt: null,
+			ts: inf.createdAt,
+			streaming: inf.status === 'streaming',
+			error: inf.status === 'error' ? inf.errorMessage : null,
+			tokens: null
+		}));
 		for (const inf of msgData.inflight ?? []) {
-			ui.push({
-				id: inf.id,
-				channelId: inf.channelId,
-				sender: 'agent',
-				senderId: inf.senderId,
-				body: inf.body,
-				hiddenAt: null,
-				ts: inf.createdAt,
-				streaming: inf.status === 'streaming',
-				error: inf.status === 'error' ? inf.errorMessage : null,
-				tokens: null
-			});
+			inflightIds.add(inf.id);
 			if (inf.status === 'streaming') {
 				streamingChannelById[inf.id] = inf.channelId;
 			}
 		}
-		messagesByChannel = { ...messagesByChannel, [channelId]: ui };
+		const merged = [...ui, ...inflightMapped].sort((a, b) => a.ts - b.ts);
+		messagesByChannel = { ...messagesByChannel, [channelId]: merged };
 		oldestLoadedTs = {
 			...oldestLoadedTs,
 			[channelId]: ui.length > 0 ? ui[0]!.ts : Number.MAX_SAFE_INTEGER
@@ -833,6 +846,12 @@
 	}
 
 	async function setMessageHidden(messageId: string, hidden: boolean) {
+		// Bug #118: inflight messages live in inflight_messages, not messages.
+		// Route dismiss actions for inflight bubbles to the dedicated endpoint.
+		if (inflightIds.has(messageId)) {
+			await dismissInflight(messageId);
+			return;
+		}
 		const res = await fetch(`/api/messages/${messageId}/visibility`, {
 			method: 'PATCH',
 			headers: { 'content-type': 'application/json' },
@@ -842,6 +861,26 @@
 			alert(`failed: ${res.status}`);
 		}
 		// The state_changed broadcast will update the in-memory map.
+	}
+
+	/** Remove an inflight bubble (bug #118). Calls DELETE /api/inflight-messages/:id
+	 * and removes the row from the in-memory channel list immediately for snappy UX. */
+	async function dismissInflight(inflightId: string) {
+		const res = await fetch(`/api/inflight-messages/${inflightId}`, { method: 'DELETE' });
+		if (!res.ok) {
+			alert(`Failed to dismiss: ${res.status}`);
+			return;
+		}
+		inflightIds.delete(inflightId);
+		// Remove from every channel's message list (inflight rows carry channelId
+		// so they could theoretically appear in multiple views, though in practice
+		// they only ever exist for one channel).
+		for (const [chId, msgs] of Object.entries(messagesByChannel)) {
+			const filtered = msgs.filter((m) => m.id !== inflightId);
+			if (filtered.length !== msgs.length) {
+				messagesByChannel = { ...messagesByChannel, [chId]: filtered };
+			}
+		}
 	}
 
 	function decideApproval(
