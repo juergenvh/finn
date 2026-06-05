@@ -1551,15 +1551,18 @@
 				/>
 				<textarea
 					bind:this={composer}
-					bind:value={draft.value}
-					oninput={onComposerInput}
+					value={draft.value}
+					oninput={(e) => {
+						draft.value = (e.currentTarget as HTMLTextAreaElement).value;
+						onComposerInput();
+					}}
 					onkeydown={onComposerKey}
 					placeholder="message — Enter to send, @-mentions become approval defaults"
 					rows="2"
 					disabled={!connected || !activeChannelId}
 				></textarea>
 			</div>
-			<button onclick={send} disabled={!connected || !draft.trim() || !activeChannelId}>send</button>
+			<button onclick={send} disabled={!connected || !draft.value.trim() || !activeChannelId}>send</button>
 		</footer>
 	</section>
 </div>
