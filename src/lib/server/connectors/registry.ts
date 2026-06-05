@@ -222,6 +222,22 @@ function resolveRecipients(
 		(t) => !memberIds.has(t) && !memberNamesLower.has(t.toLowerCase())
 	);
 
+	// If every mention token failed to resolve to a channel-member agent,
+	// treat them as false positives (e.g. email addresses, code references,
+	// accidental @-prefixes) and fall back to broadcast — same behaviour as
+	// a message with no mentions at all. This prevents messages from being
+	// silently swallowed when the body contains patterns like
+	// `user@example.com` that the mention parser matches but no agent owns.
+	// ADR-0005: mentions are a convenience narrowing, not a hard gate.
+	if (recipients.length === 0) {
+		return {
+			recipients: members,
+			mentionTokens,
+			unresolvedMentionTokens,
+			narrowedByMentions: false
+		};
+	}
+
 	return {
 		recipients,
 		mentionTokens,
