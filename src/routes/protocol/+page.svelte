@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
+	import { renderMarkdown } from '$lib/ui/markdown';
 
 	type ChannelInfo = { id: string; name: string; description: string | null };
 	type AgentInfo = { id: string; name: string; connectorType: string; enabled: boolean };
@@ -39,6 +40,7 @@
 	let rows = $state<Hit[]>([]);
 	let nextCursor = $state<string | null>(null);
 	let loading = $state(false);
+	let renderMode = $state<'rendered' | 'raw'>('rendered');
 	let errorMsg = $state<string | null>(null);
 
 	function fmtTs(ms: number): string {
@@ -297,6 +299,16 @@
 			<button onclick={exportFiltered} disabled={loading}>Export markdown</button>
 			<button onclick={exportMemory} disabled={loading} title="Export as agent memory log (memory/YYYY-MM-DD.md format)">Export memory log</button>
 		</div>
+		<div class="actions">
+			<button
+				class="toggle-render"
+				class:active={renderMode === 'rendered'}
+				onclick={() => renderMode = renderMode === 'rendered' ? 'raw' : 'rendered'}
+				title="Toggle between rendered markdown and raw source"
+			>
+				{renderMode === 'rendered' ? '⬡ rendered' : '⬡ raw'}
+			</button>
+		</div>
 	</aside>
 
 	<section class="results">
@@ -333,7 +345,11 @@
 							<span class="hidden-tag">groomed</span>
 						{/if}
 					</div>
-					<div class="hit-body">{r.body}</div>
+					{#if renderMode === 'rendered'}
+						<div class="hit-body rendered">{@html renderMarkdown(r.body, [])}</div>
+					{:else}
+						<div class="hit-body raw">{r.body}</div>
+					{/if}
 				</div>
 			{/each}
 
@@ -562,9 +578,42 @@
 		letter-spacing: 0.04em;
 	}
 	.hit-body {
-		white-space: pre-wrap;
 		word-break: break-word;
 		font-size: 0.92rem;
+	}
+	.hit-body.raw {
+		white-space: pre-wrap;
+		font-family: ui-monospace, monospace;
+		font-size: 0.82rem;
+		color: #94a3b8;
+	}
+	.hit-body.rendered :global(p) { margin: 0.25rem 0; }
+	.hit-body.rendered :global(p:first-child) { margin-top: 0; }
+	.hit-body.rendered :global(p:last-child) { margin-bottom: 0; }
+	.hit-body.rendered :global(pre) {
+		background: #1e1e2e;
+		border-radius: 4px;
+		padding: 0.5rem 0.75rem;
+		overflow-x: auto;
+		font-size: 0.82rem;
+	}
+	.hit-body.rendered :global(code:not(pre code)) {
+		background: #1e1e2e;
+		border-radius: 3px;
+		padding: 0.1em 0.3em;
+		font-size: 0.85em;
+	}
+	.hit-body.rendered :global(img) {
+		max-width: 100%;
+		height: auto;
+	}
+	.toggle-render {
+		font-size: 0.8rem;
+		color: #64748b;
+	}
+	.toggle-render.active {
+		color: #7dd3fc;
+		border-color: #7dd3fc40;
 	}
 	.empty-result {
 		color: #64748b;
