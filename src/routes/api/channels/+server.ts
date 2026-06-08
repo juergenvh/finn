@@ -5,7 +5,7 @@
  * No auth (single-user; see ADR-0001).
  */
 
-import { isNull, eq } from 'drizzle-orm';
+import { and, isNull, eq } from 'drizzle-orm';
 import { json, error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getDb } from '$lib/server/db/client';
@@ -51,11 +51,12 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	const db = getDb();
 
-	// Uniqueness on name across non-deleted channels.
+	// Uniqueness on name across active (non-archived) channels only.
+	// Archived channels release their name so it can be reused (issue #25).
 	const existing = db
 		.select({ id: channels.id })
 		.from(channels)
-		.where(eq(channels.name, name))
+		.where(and(eq(channels.name, name), isNull(channels.deletedAt)))
 		.all();
 	if (existing.some(() => true)) {
 		throw error(409, `channel name '${name}' already exists`);

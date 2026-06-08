@@ -7,7 +7,7 @@
  * clearing deleted_at via SQL (no UI for restore yet).
  */
 
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { json, error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getDb } from '$lib/server/db/client';
@@ -36,12 +36,13 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 	if (!existing) throw error(404, 'channel not found');
 	if (existing.deletedAt !== null) throw error(410, 'channel is archived');
 
-	// Uniqueness check on rename
+	// Uniqueness check on rename — only against active (non-archived) channels.
+	// Archived channels release their name (issue #25).
 	if (updates.name && updates.name !== existing.name) {
 		const clash = db
 			.select({ id: channels.id })
 			.from(channels)
-			.where(eq(channels.name, updates.name))
+			.where(and(eq(channels.name, updates.name), isNull(channels.deletedAt)))
 			.all();
 		if (clash.some((c) => c.id !== params.id)) {
 			throw error(409, `channel name '${updates.name}' already exists`);
