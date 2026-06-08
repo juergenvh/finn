@@ -103,6 +103,38 @@ export function renderMessagesAsMarkdown(args: {
 }
 
 /**
+ * Single-channel memory-log export (issue #117).
+ * Visible messages only; hour-grouped; trimmed bodies.
+ */
+export function exportChannelMemoryLog(
+	channelId: string,
+	sinceMs?: number,
+	untilMs?: number
+): { filename: string; body: string } | null {
+	const db = getDb();
+	const channel = db.select().from(channels).where(eq(channels.id, channelId)).get();
+	if (!channel) return null;
+
+	const memberRows = db
+		.select({ id: agents.id, name: agents.name })
+		.from(channelMembers)
+		.innerJoin(agents, eq(channelMembers.agentId, agents.id))
+		.where(eq(channelMembers.channelId, channelId))
+		.all();
+	const agentNameById = new Map(memberRows.map((m) => [m.id, m.name]));
+
+	let msgs = recentMessages(channelId, 5000, undefined, 'channel');
+	if (sinceMs !== undefined) msgs = msgs.filter((m) => m.createdAt >= sinceMs);
+	if (untilMs !== undefined) msgs = msgs.filter((m) => m.createdAt <= untilMs);
+
+	return exportMemoryLog({
+		messages: msgs,
+		agentNameById,
+		scopeLabel: `#${channel.name}`,
+	});
+}
+
+/**
  * Single-channel export. Audit-faithful: includes groomed messages
  * (hidden_at IS NOT NULL) since the export *is* the audit record.
  */
@@ -164,6 +196,130 @@ export function exportChannelMarkdown(channelId: string): Export | null {
 		filename: `${safeName}-${stamp}.md`,
 		body
 	};
+}
+
+/**
+ * Memory-log export (issue #117).
+ *
+ * Produces a structured markdown file suitable as a starting point for
+ * an agent's memory/YYYY-MM-DD.md. Format differences from the audit export:
+ *
+ * - Messages grouped by hour (not individual headings per message)
+ * - Long message bodies trimmed at MEMORY_BODY_TRIM_CHARS with an indicator
+ * - Hidden (groomed) messages excluded — memory is about what happened
+ * - Images (![alt](url)) kept verbatim; no binary embedding
+ * - Approval decisions abbreviated to a single line
+ * - Header instructs the agent/human to review before adding to memory
+ */
+export function exportMemoryLog(args: {
+	messages: Message[];
+	agentNameById: Map<string, string>;
+	channelNameById?: Map<string, string>;
+	scopeLabel: string;
+}): { filename: string; body: string } {
+	const { messages: msgs, agentNameById, channelNameById, scopeLabel } = args;
+
+	// Exclude groomed messages — memory captures what was visible.
+	const visible = msgs.filter((m) => m.hiddenAt === null);
+
+	const approvalsRows = approvalsForMessages(visible.map((m) => m.id));
+	const approvalByMessageId = new Map(approvalsRows.map((a) => [a.messageId, a]));
+
+	// Collect active agent names for the header.
+	const agentNames = [...new Set(
+		visible
+			.filter((m) => m.senderType === 'agent' && m.senderId)
+			.map((m) => agentNameById.get(m.senderId!) ?? m.senderId!)
+	)];
+
+	const dateRange = visible.length > 0
+		? `${fmtDate(visible[0]!.createdAt)} – ${fmtDate(visible[visible.length - 1]!.createdAt)}`
+		: 'no messages';
+
+	const lines: string[] = [];
+	lines.push(`# finn session export — ${fmtDate(Date.now())}`);
+	lines.push('');
+	lines.push(`> Generated from finn protocol on ${fmtTs(Date.now())}.`);
+	lines.push(`> Scope: ${scopeLabel} · ${visible.length} messages · ${dateRange}`);
+	if (agentNames.length > 0) {
+		lines.push(`> Agents: ${agentNames.join(', ')}`);
+	}
+	lines.push('>');
+	lines.push('> **Review and trim before adding to agent memory.**');
+	lines.push('> Images (![alt](url)) are kept as-is; no binary data is embedded.');
+	lines.push('');
+	lines.push('---');
+	lines.push('');
+
+	// Group messages by hour.
+	const hourKey = (ms: number) => {
+		const d = new Date(ms);
+		return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`;
+	};
+
+	let lastHour = '';
+	for (const m of visible) {
+		const hour = hourKey(m.createdAt);
+		if (hour !== lastHour) {
+			if (lastHour) lines.push('');
+			lines.push(`## ${hour}`);
+			lines.push('');
+			lastHour = hour;
+		}
+
+		const who = senderName(m, agentNameById);
+		const channelTag = channelNameById
+			? `[#${channelNameById.get(m.channelId) ?? m.channelId}] `
+			: '';
+		const timeStr = fmtTime(m.createdAt);
+		const body = trimBody(m.body);
+
+		lines.push(`**${channelTag}${who}** ${timeStr} — ${body}`);
+
+		const approval = approvalByMessageId.get(m.id);
+		if (approval) {
+			lines.push(`  _(${approvalSummaryShort(approval, agentNameById)})_`);
+		}
+	}
+	lines.push('');
+
+	const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace(/Z$/, '');
+	return {
+		filename: `memory-export-${stamp}.md`,
+		body: lines.join('\n')
+	};
+}
+
+const MEMORY_BODY_TRIM_CHARS = 300;
+
+function trimBody(body: string): string {
+	const single = body.replace(/\n+/g, ' ').trim();
+	if (single.length <= MEMORY_BODY_TRIM_CHARS) return single;
+	return `${single.slice(0, MEMORY_BODY_TRIM_CHARS)}[…+${single.length - MEMORY_BODY_TRIM_CHARS} chars]`;
+}
+
+function fmtDate(ms: number): string {
+	const d = new Date(ms);
+	return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+
+function fmtTime(ms: number): string {
+	const d = new Date(ms);
+	return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function pad(n: number): string {
+	return String(n).padStart(2, '0');
+}
+
+function approvalSummaryShort(a: Approval, agentNameById: Map<string, string>): string {
+	const targets = targetsOf(a).map((id) => agentNameById.get(id) ?? id).join(', ');
+	switch (a.status) {
+		case 'pending': return `approval pending → ${targets || '(no targets)'}`;
+		case 'approved': return `approved → ${targets}`;
+		case 'routed': return `routed → ${targets}`;
+		case 'rejected': return a.rejectReason ? `rejected: "${a.rejectReason}"` : 'rejected';
+	}
 }
 
 /**
