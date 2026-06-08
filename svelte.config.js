@@ -7,10 +7,41 @@ const config = {
 		runes: ({ filename }) => (filename.split(/[/\\]/).includes('node_modules') ? undefined : true)
 	},
 	kit: {
-		// adapter-auto only supports some environments, see https://svelte.dev/docs/kit/adapter-auto for a list.
-		// If your environment is not supported, or you settled on a specific environment, switch out the adapter.
-		// See https://svelte.dev/docs/kit/adapters for more information about adapters.
-		adapter: adapter()
+		adapter: adapter(),
+
+		// Content-Security-Policy (issue #106, companion to ADR-0023).
+		// mode:'nonce' makes SvelteKit inject the nonce into its own hydration
+		// scripts automatically; no manual %sveltekit.nonce% required.
+		csp: {
+			mode: 'nonce',
+			directives: {
+				'default-src': ['self'],
+				// 'self' covers same-origin scripts; nonce covers SvelteKit
+				// hydration inline scripts injected at render time.
+				'script-src': ['self'],
+				// 'unsafe-inline' for styles: SvelteKit scoped CSS and a small
+				// number of inline style attributes (e.g. display:contents in
+				// app.html, dynamic width/height in UI components). Lower risk
+				// than unsafe-inline for scripts.
+				'style-src': ['self', 'unsafe-inline'],
+				// 'self' for static assets (favicon.svg, etc.).
+				// 'https:' allows agent-emitted HTTPS image URLs per ADR-0023.
+				// 'data:' covers SVG favicons and any data-URI images.
+				'img-src': ['self', 'https:', 'data:'],
+				// 'self' covers same-origin WebSocket (ws:// in dev, wss:// in
+				// prod) per CSP Level 2 same-origin matching.
+				'connect-src': ['self'],
+				'font-src': ['self'],
+				// Deny all plugin content.
+				'object-src': ['none'],
+				// Restrict base element to same origin.
+				'base-uri': ['self'],
+				// Restrict form submissions to same origin.
+				'form-action': ['self'],
+				// Deny embedding in frames/iframes (clickjacking protection).
+				'frame-ancestors': ['none']
+			}
+		}
 	}
 };
 
