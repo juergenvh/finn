@@ -32,6 +32,11 @@ const config = {
 				// prod) per CSP Level 2 same-origin matching.
 				'connect-src': ['self'],
 				'font-src': ['self'],
+				// Allow blob: workers — Vite's HMR client creates a blob: worker
+				// when polling for reconnect after a connection loss. Without this,
+				// 'script-src' is used as fallback and blocks the blob: URL, leaving
+				// the page in a broken state (textarea unresponsive) after inactivity.
+				'worker-src': ['self', 'blob:'],
 				// Deny all plugin content.
 				'object-src': ['none'],
 				// Restrict base element to same origin.
