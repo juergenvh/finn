@@ -190,6 +190,12 @@
 		window.location.href = url;
 	}
 
+	function exportMemory() {
+		const qs = buildQueryString();
+		const url = `/api/protocol/export?format=memory${qs ? `&${qs}` : ''}`;
+		window.location.href = url;
+	}
+
 	onMount(async () => {
 		loadFromUrl();
 		await loadFilters();
@@ -289,6 +295,7 @@
 		</div>
 		<div class="actions">
 			<button onclick={exportFiltered} disabled={loading}>Export markdown</button>
+			<button onclick={exportMemory} disabled={loading} title="Export as agent memory log (memory/YYYY-MM-DD.md format)">Export memory log</button>
 		</div>
 	</aside>
 

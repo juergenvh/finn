@@ -11,7 +11,9 @@
 
 import { error } from '@sveltejs/kit';
 import { queryProtocol, type ProtocolQuery, type VisibilityFilter } from '$lib/server/protocol';
-import { exportProtocolMarkdown } from '$lib/server/export-channel';
+import { exportProtocolMarkdown, exportMemoryLog } from '$lib/server/export-channel';
+import { getDb } from '$lib/server/db/client';
+import { agents, channels } from '$lib/server/db/schema';
 import type { RequestHandler } from './$types';
 
 const HARD_EXPORT_LIMIT = 50_000;
@@ -43,7 +45,7 @@ function parseNumber(v: string | null): number | undefined {
 
 export const GET: RequestHandler = async ({ url }) => {
 	const format = url.searchParams.get('format') ?? 'md';
-	if (format !== 'md') throw error(400, `unsupported export format: ${format}`);
+	if (format !== 'md' && format !== 'memory') throw error(400, `unsupported export format: ${format}`);
 
 	const baseQuery: ProtocolQuery = {
 		channelIds: parseList(url.searchParams.get('channels')),
@@ -89,7 +91,18 @@ export const GET: RequestHandler = async ({ url }) => {
 		filterSummary.push(`visibility: ${baseQuery.visibility}`);
 	if (baseQuery.onlyRejected) filterSummary.push('only rejected approvals');
 
-	const exported = exportProtocolMarkdown({ rows: all, filterSummary });
+	let exported: { filename: string; body: string };
+	if (format === 'memory') {
+		const db = getDb();
+		const allAgents = db.select({ id: agents.id, name: agents.name }).from(agents).all();
+		const agentNameById = new Map(allAgents.map((a) => [a.id, a.name]));
+		const channelRows = db.select({ id: channels.id, name: channels.name }).from(channels).all();
+		const channelNameById = new Map(channelRows.map((c) => [c.id, c.name]));
+		const scopeLabel = filterSummary.length > 0 ? filterSummary.join(' · ') : 'all channels';
+		exported = exportMemoryLog({ messages: all, agentNameById, channelNameById, scopeLabel });
+	} else {
+		exported = exportProtocolMarkdown({ rows: all, filterSummary });
+	}
 
 	return new Response(exported.body, {
 		headers: {
