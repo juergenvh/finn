@@ -1,37 +1,132 @@
 /*
- * App-wide baseline. Applies on every route (loaded by +layout.svelte).
+ * App-wide baseline and design token system (UI refresh #129).
  *
- * Holds the dark colour scheme so /settings, /protocol and any future
- * route inherit the same base instead of each page redeclaring it
- * locally. Page-level component styles read these as a starting point
- * and override where the page differs.
+ * Inter is self-hosted via @fontsource/inter — no external font requests,
+ * CSP stays tight. All surfaces consume the --finn-* custom properties
+ * defined here instead of hardcoded hex values.
  *
- * A future theming PR (separate from ADR-0019) introduces CSS variables
- * for `data-theme="light|dark"` switching; until then the dark scheme
- * is the only one.
+ * Theme switching (data-theme="light|dark") is wired in #137.
  */
+
+/* Self-hosted Inter (fontsource) */
+@import '@fontsource/inter/300.css';
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+
+/* ─── Design tokens ────────────────────────────────────────────── */
+:root {
+	/* Backgrounds */
+	--finn-bg-base:     #09090b;
+	--finn-bg-elevated: #121214;
+	--finn-bg-surface:  #18181b;
+	--finn-bg-input:    #0f0f11;
+	--finn-bg-hover:    #1c1c1f;
+	--finn-bg-active:   #27272a;
+
+	/* Borders */
+	--finn-border:       rgba(255, 255, 255, 0.06);
+	--finn-border-hover: rgba(255, 255, 255, 0.10);
+	--finn-border-focus: rgba(167, 139, 250, 0.40);
+
+	/* Text */
+	--finn-text-primary:  #fafafa;
+	--finn-text-secondary: #a1a1aa;
+	--finn-text-muted:    #71717a;
+	--finn-text-disabled: #52525b;
+
+	/* Accent — violet family */
+	--finn-accent:       #8b5cf6;
+	--finn-accent-hover: #a78bfa;
+	--finn-accent-soft:  rgba(139, 92, 246, 0.12);
+	--finn-accent-glow:  rgba(139, 92, 246, 0.25);
+
+	/* Semantic */
+	--finn-success:    #34d399;
+	--finn-error:      #f87171;
+	--finn-error-bg:   rgba(248, 113, 113, 0.08);
+	--finn-warning:    #fbbf24;
+
+	/* Shadows */
+	--finn-shadow-sm:   0 1px 2px rgba(0, 0, 0, 0.30);
+	--finn-shadow-md:   0 4px 24px rgba(0, 0, 0, 0.40);
+	--finn-shadow-lg:   0 20px 50px rgba(0, 0, 0, 0.60);
+	--finn-shadow-glow: 0 0 20px var(--finn-accent-glow);
+
+	/* Radii */
+	--finn-radius-sm:   6px;
+	--finn-radius-md:   10px;
+	--finn-radius-lg:   14px;
+	--finn-radius-xl:   18px;
+	--finn-radius-full: 9999px;
+
+	/* Spacing */
+	--finn-space-1: 0.25rem;
+	--finn-space-2: 0.5rem;
+	--finn-space-3: 0.75rem;
+	--finn-space-4: 1rem;
+	--finn-space-6: 1.5rem;
+
+	/* Typography */
+	--finn-font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+	--finn-font-mono: ui-monospace, 'SF Mono', Menlo, Monaco, monospace;
+	--finn-text-xs:   0.75rem;
+	--finn-text-sm:   0.85rem;
+	--finn-text-base: 0.95rem;
+	--finn-text-lg:   1.1rem;
+
+	/* Transitions */
+	--finn-transition-fast: 150ms ease;
+	--finn-transition-base: 200ms ease;
+}
+
+/* ─── Base reset ────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
 
 html,
 body {
 	margin: 0;
 	height: 100%;
-	font-family: ui-sans-serif, system-ui, sans-serif;
-	background: #0e0e10;
-	color: #e8e8ea;
+	font-family: var(--finn-font-sans);
+	background: var(--finn-bg-base);
+	color: var(--finn-text-primary);
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
 }
 
-/* The main channel view sets overflow:hidden on html,body because it
- * owns the scrollable surface internally. Other routes (settings,
- * protocol search) want normal document scroll, so we scope the
- * overflow lock to the channel view via a body class set in +page.svelte
- * if/when it grows beyond what current rules cover. Today the channel
- * view re-asserts overflow:hidden in its own scope-global block; nothing
- * else needs to. */
-
 a {
-	color: #6ee7b7;
+	color: var(--finn-accent);
+	text-decoration: none;
+	transition: color var(--finn-transition-fast);
 }
 
 a:hover {
-	color: #a7f3d0;
+	color: var(--finn-accent-hover);
+}
+
+/* Focus ring — replaces per-component outlines */
+*:focus-visible {
+	outline: none;
+	box-shadow: 0 0 0 2px var(--finn-border-focus);
+}
+
+/* Scrollbar — subtle dark style */
+::-webkit-scrollbar {
+	width: 6px;
+	height: 6px;
+}
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.10);
+	border-radius: var(--finn-radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+	background: rgba(255, 255, 255, 0.18);
 }
