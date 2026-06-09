@@ -305,14 +305,24 @@
 		}
 	}
 
+	let _themeMediaQuery: MediaQueryList | null = null;
+
 	function applyThemeToHtml(theme: Theme) {
-		// Minimal theme-attribute hook. Actual dark-mode CSS-variable
-		// restyling is deliberately out of scope of ADR-0019 — this
-		// just makes the picker functional and persists the choice,
-		// so a future styling PR has somewhere to read from.
-		if (typeof document !== 'undefined') {
+		if (typeof document === 'undefined') return;
+		if (theme === 'system') {
+			const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+			document.documentElement.dataset.theme = prefersDark ? 'dark' : 'light';
+		} else {
 			document.documentElement.dataset.theme = theme;
 		}
+	}
+
+	function listenSystemTheme() {
+		if (typeof window === 'undefined') return;
+		_themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+		_themeMediaQuery.addEventListener('change', () => {
+			if (global?.theme === 'system') applyThemeToHtml('system');
+		});
 	}
 
 	function connectWs() {
@@ -356,6 +366,7 @@
 	onMount(async () => {
 		await Promise.all([loadGlobal(), loadChannels()]);
 		if (global) applyThemeToHtml(global.theme);
+		listenSystemTheme();
 		// Deep-link via /settings#<channelId>. The channel-header gear
 		// in +page.svelte produces such a link. Hash takes effect after
 		// the channel list has loaded so the selection is recognised.
@@ -636,22 +647,21 @@
 		display: grid;
 		grid-template-columns: 240px 1fr;
 		min-height: 100vh;
-		background: #0e0e10;
-		color: #e8e8ea;
 	}
 
 	.rail {
-		border-right: 1px solid #2a2a30;
-		padding: 16px;
-		background: #16161a;
+		border-right: 1px solid var(--finn-border);
+		padding: var(--finn-space-4);
+		background: var(--finn-bg-elevated);
 	}
 
 	.rail h2 {
 		margin: 0 0 12px 0;
-		font-size: 1rem;
+		font-size: var(--finn-text-xs);
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: #94a3b8;
+		letter-spacing: 0.08em;
+		font-weight: 600;
+		color: var(--finn-text-muted);
 	}
 
 	.rail nav {
@@ -665,50 +675,51 @@
 		background: transparent;
 		border: 0;
 		padding: 6px 10px;
-		border-radius: 4px;
+		border-radius: var(--finn-radius-sm);
 		cursor: pointer;
 		font: inherit;
-		color: #cbd5e1;
+		color: var(--finn-text-secondary);
+		transition: background var(--finn-transition-fast);
 	}
 
 	.rail button:hover {
-		background: #1f1f24;
+		background: var(--finn-bg-hover);
 	}
 
 	.rail button.active {
-		background: #2a2a30;
-		color: #e8e8ea;
+		background: var(--finn-accent-soft);
+		color: var(--finn-accent-hover);
 		font-weight: 600;
 	}
 
 	.rail-divider {
 		margin-top: 12px;
 		padding: 4px 10px;
-		font-size: 0.75rem;
+		font-size: var(--finn-text-xs);
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-		color: #64748b;
+		color: var(--finn-text-muted);
 	}
 
 	.rail-empty {
 		padding: 6px 10px;
-		color: #64748b;
+		color: var(--finn-text-muted);
 		font-style: italic;
-		font-size: 0.9rem;
+		font-size: var(--finn-text-sm);
 	}
 
 	.rail-foot {
 		margin-top: 24px;
-		font-size: 0.85rem;
+		font-size: var(--finn-text-sm);
 	}
 
 	.rail-foot a {
-		color: #6ee7b7;
+		color: var(--finn-success);
 		text-decoration: none;
 	}
 
 	.rail-foot a:hover {
-		color: #a7f3d0;
+		color: var(--finn-text-primary);
 	}
 
 	.pane {
@@ -718,12 +729,12 @@
 
 	.pane h1 {
 		margin-top: 0;
-		color: #f1f5f9;
+		color: var(--finn-text-primary);
 	}
 
 	.note {
-		color: #94a3b8;
-		font-size: 0.9rem;
+		color: var(--finn-text-secondary);
+		font-size: var(--finn-text-sm);
 		max-width: 60ch;
 	}
 
@@ -743,16 +754,23 @@
 
 	.field label {
 		font-weight: 600;
-		color: #cbd5e1;
+		color: var(--finn-text-secondary);
 	}
 
 	.field input[type='number'],
 	.field select {
-		background: #1f1f24;
-		color: #e8e8ea;
-		border: 1px solid #2a2a30;
-		border-radius: 4px;
+		background: var(--finn-bg-input);
+		color: var(--finn-text-primary);
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-sm);
 		font: inherit;
+		transition: border-color var(--finn-transition-fast);
+	}
+
+	.field input[type='number']:focus,
+	.field select:focus {
+		outline: none;
+		border-color: var(--finn-accent);
 	}
 
 	.field input[type='number'] {
@@ -766,19 +784,19 @@
 	}
 
 	.field input[type='checkbox'] {
-		accent-color: #6ee7b7;
+		accent-color: var(--finn-accent);
 		width: 16px;
 		height: 16px;
 	}
 
 	.field .unit {
-		color: #94a3b8;
+		color: var(--finn-text-secondary);
 	}
 
 	.field .hint {
 		grid-column: 2 / -1;
-		color: #64748b;
-		font-size: 0.8rem;
+		color: var(--finn-text-muted);
+		font-size: var(--finn-text-xs);
 		margin-top: 2px;
 	}
 
@@ -792,14 +810,15 @@
 		padding: 6px 14px;
 		font: inherit;
 		cursor: pointer;
-		border: 1px solid #2a2a30;
-		background: #1f2937;
-		color: #f1f5f9;
-		border-radius: 4px;
+		border: 1px solid var(--finn-border);
+		background: var(--finn-bg-surface);
+		color: var(--finn-text-secondary);
+		border-radius: var(--finn-radius-sm);
+		transition: background var(--finn-transition-fast);
 	}
 
 	.actions button:hover:not(:disabled) {
-		background: #2a3441;
+		background: var(--finn-bg-hover);
 	}
 
 	.actions button:disabled {
@@ -807,31 +826,43 @@
 		cursor: not-allowed;
 	}
 
+	.actions button.primary {
+		background: var(--finn-accent);
+		border-color: var(--finn-accent);
+		color: #fff;
+		font-weight: 500;
+	}
+
+	.actions button.primary:hover:not(:disabled) {
+		background: var(--finn-accent-hover);
+		box-shadow: var(--finn-shadow-glow);
+	}
+
 	.actions button.secondary {
 		background: transparent;
-		color: #cbd5e1;
+		color: var(--finn-text-secondary);
 	}
 
 	.actions button.secondary:hover:not(:disabled) {
-		background: #1f1f24;
+		background: var(--finn-bg-hover);
 	}
 
 	.actions button.danger {
 		background: transparent;
-		color: #fca5a5;
-		border-color: #4a1f1f;
+		color: var(--finn-error);
+		border-color: var(--finn-error);
 		margin-left: auto;
 	}
 
 	.actions button.danger:hover:not(:disabled) {
-		background: #3a1a1a;
+		background: var(--finn-error-bg);
 	}
 
 	.error {
-		color: #fca5a5;
-		background: #3a1a1a;
-		border: 1px solid #4a1f1f;
+		color: var(--finn-error);
+		background: var(--finn-error-bg);
+		border: 1px solid var(--finn-error);
 		padding: 8px 12px;
-		border-radius: 4px;
+		border-radius: var(--finn-radius-sm);
 	}
 </style>

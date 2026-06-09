@@ -371,9 +371,6 @@
 		margin: 0;
 		height: 100%;
 		overflow: hidden;
-		font-family: ui-sans-serif, system-ui, sans-serif;
-		background: #0e0e10;
-		color: #e8e8ea;
 	}
 	.root {
 		display: grid;
@@ -383,9 +380,9 @@
 		overflow: hidden;
 	}
 	aside {
-		background: #16161a;
-		border-right: 1px solid #2a2a30;
-		padding: 0.75rem;
+		background: var(--finn-bg-elevated);
+		border-right: 1px solid var(--finn-border);
+		padding: var(--finn-space-4);
 		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
@@ -397,12 +394,12 @@
 		gap: 0.6rem;
 	}
 	.back {
-		color: #94a3b8;
+		color: var(--finn-text-secondary);
 		text-decoration: none;
-		font-size: 0.85rem;
+		font-size: var(--finn-text-sm);
 	}
 	.back:hover {
-		color: #e8e8ea;
+		color: var(--finn-text-primary);
 	}
 	.brand h1 {
 		margin: 0;
@@ -415,10 +412,11 @@
 		gap: 0.3rem;
 	}
 	.lbl {
-		font-size: 0.7rem;
-		color: #94a3b8;
+		font-size: var(--finn-text-xs);
+		color: var(--finn-text-secondary);
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
+		font-weight: 500;
 	}
 	.check-list {
 		display: flex;
@@ -426,62 +424,76 @@
 		gap: 0.2rem;
 		max-height: 9rem;
 		overflow-y: auto;
-		border: 1px solid #2a2a30;
-		border-radius: 4px;
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-sm);
 		padding: 0.3rem 0.4rem;
-		background: #0e0e10;
+		background: var(--finn-bg-input);
 	}
 	.check-row {
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;
-		font-size: 0.85rem;
-		color: #cbd5e1;
+		font-size: var(--finn-text-sm);
+		color: var(--finn-text-secondary);
 		cursor: pointer;
 	}
 	.meta {
-		color: #64748b;
-		font-size: 0.7rem;
+		color: var(--finn-text-muted);
+		font-size: var(--finn-text-xs);
 		margin-left: auto;
 	}
 	.hint {
-		color: #64748b;
-		font-size: 0.72rem;
+		color: var(--finn-text-muted);
+		font-size: var(--finn-text-xs);
 	}
 	.empty {
-		color: #64748b;
+		color: var(--finn-text-muted);
 		font-style: italic;
-		font-size: 0.8rem;
+		font-size: var(--finn-text-sm);
 	}
 	input:not([type]),
 	input[type='datetime-local'],
 	select {
-		background: #0e0e10;
-		border: 1px solid #2a2a30;
-		color: #e8e8ea;
+		background: var(--finn-bg-input);
+		border: 1px solid var(--finn-border);
+		color: var(--finn-text-primary);
 		padding: 0.35rem 0.5rem;
 		font-family: inherit;
-		font-size: 0.85rem;
-		border-radius: 4px;
+		font-size: var(--finn-text-sm);
+		border-radius: var(--finn-radius-sm);
+		transition: border-color var(--finn-transition-fast);
+	}
+	input:focus, select:focus {
+		outline: none;
+		border-color: var(--finn-accent);
 	}
 	.actions {
 		display: flex;
 		gap: 0.5rem;
 	}
 	.actions button {
-		background: #2a2a30;
-		color: #e8e8ea;
-		border: 1px solid #3a3a42;
+		background: var(--finn-bg-surface);
+		color: var(--finn-text-secondary);
+		border: 1px solid var(--finn-border);
 		padding: 0.4rem 0.75rem;
 		font-family: inherit;
-		font-size: 0.85rem;
-		border-radius: 4px;
+		font-size: var(--finn-text-sm);
+		border-radius: var(--finn-radius-sm);
 		cursor: pointer;
 		flex: 1;
+		transition: background var(--finn-transition-fast);
+	}
+	.actions button:hover:not(:disabled) {
+		background: var(--finn-bg-hover);
 	}
 	.actions button.primary {
-		background: #075985;
-		border-color: #0284c7;
+		background: var(--finn-accent);
+		border-color: var(--finn-accent);
+		color: #fff;
+		font-weight: 500;
+	}
+	.actions button.primary:hover:not(:disabled) {
+		background: var(--finn-accent-hover);
 	}
 	.actions button:disabled {
 		opacity: 0.5;
@@ -497,22 +509,23 @@
 	}
 	.results header {
 		flex: 0 0 auto;
-		padding: 0.75rem 1rem;
-		border-bottom: 1px solid #2a2a30;
+		padding: 0.75rem var(--finn-space-4);
+		border-bottom: 1px solid var(--finn-border);
+		background: var(--finn-bg-elevated);
 	}
 	.result-summary {
-		font-size: 0.9rem;
-		color: #cbd5e1;
+		font-size: var(--finn-text-sm);
+		color: var(--finn-text-secondary);
 	}
 	.more {
-		color: #64748b;
-		font-size: 0.8rem;
+		color: var(--finn-text-muted);
+		font-size: var(--finn-text-sm);
 	}
 	.error {
-		background: #3a1a1a;
-		color: #fca5a5;
-		padding: 0.5rem 1rem;
-		font-size: 0.9rem;
+		background: var(--finn-error-bg);
+		color: var(--finn-error);
+		padding: 0.5rem var(--finn-space-4);
+		font-size: var(--finn-text-sm);
 	}
 	main {
 		flex: 1 1 auto;
@@ -525,23 +538,21 @@
 	}
 	.hit {
 		padding: 0.5rem 0.75rem;
-		background: #16161a;
-		border: 1px solid #2a2a30;
-		border-radius: 6px;
+		background: var(--finn-bg-elevated);
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-md);
 	}
-	/* Two-tone backgrounds to distinguish user from agent messages
-	 * at a glance in long audit trails (issue #93). System messages
-	 * keep the neutral .hit background. The shades sit close to the
-	 * channel-view palette so the audit surface reads as related. */
+	/* Two-tone backgrounds to distinguish user from agent messages. */
 	.hit.sender-user {
-		background: #1c1f2a;
+		background: var(--finn-accent-soft);
+		border-color: var(--finn-accent-glow);
 	}
 	.hit.sender-agent {
-		background: #1a1f1a;
+		background: var(--finn-bg-surface);
 	}
 	.hit.hidden-row {
 		opacity: 0.6;
-		border-left: 3px dashed #475569;
+		border-left: 3px dashed var(--finn-text-disabled);
 	}
 	.hit-header {
 		display: flex;
@@ -551,29 +562,30 @@
 		font-size: 0.8rem;
 	}
 	.channel-pill {
-		background: #1e3a5f;
-		color: #cbd5e1;
+		background: var(--finn-accent-soft);
+		color: var(--finn-accent-hover);
 		padding: 0.1rem 0.45rem;
-		border-radius: 9999px;
+		border-radius: var(--finn-radius-full);
 		text-decoration: none;
-		font-size: 0.75rem;
+		font-size: var(--finn-text-xs);
+		transition: background var(--finn-transition-fast);
 	}
 	.channel-pill:hover {
-		background: #1f4b78;
-		color: #f1f5f9;
+		background: rgba(139, 92, 246, 0.2);
+		color: var(--finn-text-primary);
 	}
 	.sender {
-		color: #e2e8f0;
+		color: var(--finn-text-primary);
 		font-weight: 500;
 	}
 	.ts {
-		color: #64748b;
-		font-size: 0.75rem;
+		color: var(--finn-text-muted);
+		font-size: var(--finn-text-xs);
 	}
 	.hidden-tag {
 		margin-left: auto;
-		color: #94a3b8;
-		font-size: 0.7rem;
+		color: var(--finn-text-secondary);
+		font-size: var(--finn-text-xs);
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 	}
@@ -583,23 +595,25 @@
 	}
 	.hit-body.raw {
 		white-space: pre-wrap;
-		font-family: ui-monospace, monospace;
+		font-family: var(--finn-font-mono);
 		font-size: 0.82rem;
-		color: #94a3b8;
+		color: var(--finn-text-secondary);
 	}
 	.hit-body.rendered :global(p) { margin: 0.25rem 0; }
 	.hit-body.rendered :global(p:first-child) { margin-top: 0; }
 	.hit-body.rendered :global(p:last-child) { margin-bottom: 0; }
 	.hit-body.rendered :global(pre) {
-		background: #1e1e2e;
-		border-radius: 4px;
+		background: var(--finn-bg-elevated);
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-sm);
 		padding: 0.5rem 0.75rem;
 		overflow-x: auto;
 		font-size: 0.82rem;
 	}
 	.hit-body.rendered :global(code:not(pre code)) {
-		background: #1e1e2e;
-		border-radius: 3px;
+		background: var(--finn-bg-elevated);
+		color: var(--finn-accent-hover);
+		border-radius: var(--finn-radius-sm);
 		padding: 0.1em 0.3em;
 		font-size: 0.85em;
 	}
@@ -608,15 +622,15 @@
 		height: auto;
 	}
 	.toggle-render {
-		font-size: 0.8rem;
-		color: #64748b;
+		font-size: var(--finn-text-xs);
+		color: var(--finn-text-muted);
 	}
 	.toggle-render.active {
-		color: #7dd3fc;
-		border-color: #7dd3fc40;
+		color: var(--finn-accent-hover);
+		border-color: var(--finn-accent-glow);
 	}
 	.empty-result {
-		color: #64748b;
+		color: var(--finn-text-muted);
 		text-align: center;
 		font-style: italic;
 		padding: 2rem 0;
@@ -624,18 +638,19 @@
 	.load-more {
 		align-self: center;
 		background: transparent;
-		border: 1px solid #2a2a30;
-		color: #94a3b8;
+		border: 1px solid var(--finn-border);
+		color: var(--finn-text-muted);
 		padding: 0.4rem 1rem;
 		font-family: inherit;
-		font-size: 0.85rem;
-		border-radius: 999px;
+		font-size: var(--finn-text-sm);
+		border-radius: var(--finn-radius-full);
 		cursor: pointer;
 		margin-top: 1rem;
+		transition: background var(--finn-transition-fast), color var(--finn-transition-fast);
 	}
 	.load-more:hover {
-		background: #1f1f24;
-		color: #e8e8ea;
+		background: var(--finn-bg-hover);
+		color: var(--finn-text-secondary);
 	}
 	.load-more:disabled {
 		opacity: 0.5;
