@@ -1373,60 +1373,6 @@
 			{/if}
 		</div>
 
-		<div class="section">
-			<div class="section-header">
-				<button
-					class="section-title-btn"
-					type="button"
-					aria-expanded={!agentsCollapsed}
-					title={agentsCollapsed ? 'expand agents' : 'collapse agents'}
-					onclick={() => toggleSection('agents')}
-				>
-					<span class="caret">{agentsCollapsed ? '▸' : '▾'}</span>
-					<span class="section-title">agents</span>
-				</button>
-				<div class="section-header-actions">
-					<button
-						class="add-btn"
-						title="load agent from file"
-						onclick={triggerLoadAgent}
-					>⇧</button>
-					<input
-						bind:this={loadAgentInput}
-						type="file"
-						accept="application/json,.json"
-						style="display:none"
-						onchange={onLoadAgentFile}
-					/>
-					<button class="add-btn" title="add agent" onclick={() => (modal = { kind: 'create_agent' })}>+</button>
-				</div>
-			</div>
-			{#if !agentsCollapsed}
-			{#each allAgents as a (a.id)}
-				<div class="row-wrapper">
-					<div class="member-row">
-						<span class="dot" class:disabled={!a.enabled}></span>
-						<div class="agent-id">
-							<span class="agent-name">{a.name}</span>
-							<span class="connector">{a.connectorType}</span>
-						</div>
-					</div>
-					<button class="row-menu-btn" title="actions" onclick={() => toggleMenu(`ag:${a.id}`)}>⋯</button>
-					{#if openMenu === `ag:${a.id}`}
-						<div class="menu" role="menu">
-							<button onclick={() => openEditAgent(a.id)}>Edit</button>
-							<button onclick={() => toggleAgentEnabled(a)}>
-								{a.enabled ? 'Disable' : 'Enable'}
-							</button>
-							<button onclick={() => saveAgentToFile(a.id)}>Save to file</button>
-							<button onclick={() => archiveAgent(a.id)}>Archive</button>
-						</div>
-					{/if}
-				</div>
-			{/each}
-			{/if}
-		</div>
-
 		{#if activeChannelId && activeMembers.length > 0}
 			<div class="section">
 				<div class="section-title">in this channel</div>
