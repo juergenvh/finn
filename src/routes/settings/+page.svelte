@@ -13,8 +13,18 @@
 -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import AgentForm from '$lib/ui/AgentForm.svelte';
+	import type { AgentFormPayload } from '$lib/ui/AgentForm.svelte';
 
 	type Theme = 'system' | 'light' | 'dark';
+
+	type AgentInfo = {
+		id: string;
+		name: string;
+		connectorType: string;
+		enabled: boolean;
+		config?: Record<string, unknown>;
+	};
 
 	type Global = {
 		kbBudgetDefault: number;
@@ -44,7 +54,13 @@
 
 	let channels = $state<ChannelInfo[]>([]);
 	let global = $state<Global | null>(null);
-	let selected = $state<string>('global'); // 'global' | channelId
+	let selected = $state<string>('global'); // 'global' | channelId | 'agents'
+
+	// ── Agent management state ──────────────────────────────────────
+	let agentsList = $state<AgentInfo[]>([]);
+	let agentsLoading = $state(false);
+	let agentFormMode = $state<'none' | 'create' | 'edit'>('none');
+	let editingAgent = $state<AgentInfo | null>(null);
 	let channelDetail = $state<ChannelSettings | null>(null);
 	let loadError = $state<string | null>(null);
 	let saveError = $state<string | null>(null);
@@ -131,6 +147,55 @@
 		// Server sorts by name (GET /api/channels, issue #92); no
 		// client-side re-sort needed.
 		channels = data.channels as ChannelInfo[];
+	}
+
+	async function loadAgents() {
+		agentsLoading = true;
+		try {
+			const res = await fetch('/api/agents?include_archived=0');
+			if (!res.ok) return;
+			const data = await res.json();
+			agentsList = data.agents as AgentInfo[];
+		} finally {
+			agentsLoading = false;
+		}
+	}
+
+	async function submitAgentForm(payload: AgentFormPayload) {
+		if (payload.mode === 'create') {
+			const res = await fetch('/api/agents', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ name: payload.name, enabled: payload.enabled, config: payload.config })
+			});
+			if (!res.ok) throw new Error((await res.json()).message ?? `HTTP ${res.status}`);
+		} else {
+			if (!editingAgent) return;
+			const res = await fetch(`/api/agents/${editingAgent.id}`, {
+				method: 'PATCH',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ name: payload.name, enabled: payload.enabled, config: payload.config })
+			});
+			if (!res.ok) throw new Error((await res.json()).message ?? `HTTP ${res.status}`);
+		}
+		agentFormMode = 'none';
+		editingAgent = null;
+		await loadAgents();
+	}
+
+	async function openEditAgent(agent: AgentInfo) {
+		// Fetch full config from the single-agent endpoint before opening the form
+		const res = await fetch(`/api/agents/${agent.id}`);
+		if (!res.ok) return;
+		const data = await res.json();
+		editingAgent = { ...agent, config: data.config ?? {} };
+		agentFormMode = 'edit';
+	}
+
+	async function archiveAgent(agent: AgentInfo) {
+		if (!confirm(`Archive agent "${agent.name}"? It will no longer dispatch; past messages remain attributed.`)) return;
+		const res = await fetch(`/api/agents/${agent.id}`, { method: 'DELETE' });
+		if (res.ok) await loadAgents();
 	}
 
 	async function loadChannelDetail(channelId: string) {
@@ -342,7 +407,12 @@
 			} catch {
 				return;
 			}
-			if (msg.type !== 'state_changed' || msg.entity !== 'settings') return;
+			if (msg.type !== 'state_changed') return;
+			if (msg.entity === 'agent') {
+				await loadAgents();
+				return;
+			}
+			if (msg.entity !== 'settings') return;
 			if (msg.id === 'global') {
 				await loadGlobal();
 				// If we're viewing a per-channel pane, the effective
@@ -364,7 +434,7 @@
 	});
 
 	onMount(async () => {
-		await Promise.all([loadGlobal(), loadChannels()]);
+		await Promise.all([loadGlobal(), loadChannels(), loadAgents()]);
 		if (global) applyThemeToHtml(global.theme);
 		listenSystemTheme();
 		// Deep-link via /settings#<channelId>. The channel-header gear
@@ -414,6 +484,14 @@
 				onclick={() => (selected = 'global')}
 			>
 				Global
+			</button>
+			<div class="rail-divider">Agents</div>
+			<button
+				type="button"
+				class:active={selected === 'agents'}
+				onclick={() => (selected = 'agents')}
+			>
+				Manage Agents
 			</button>
 			<div class="rail-divider">Channels</div>
 			{#each channels as ch (ch.id)}
@@ -632,8 +710,57 @@
 				<p>Loading…</p>
 			{/if}
 		{/if}
+
+		{#if selected === 'agents'}
+			<h1>Agents</h1>
+			<p class="note">All available agents. Agents can be added to channels from the main channel view.</p>
+
+			<div class="agent-actions">
+				<button type="button" class="primary" onclick={() => { agentFormMode = 'create'; editingAgent = null; }}>
+					+ New Agent
+				</button>
+			</div>
+
+			{#if agentsLoading}
+				<p class="note">Loading…</p>
+			{:else if agentsList.length === 0}
+				<p class="note empty">No agents yet. Create one to get started.</p>
+			{:else}
+				<div class="agent-list">
+					{#each agentsList as agent (agent.id)}
+						<div class="agent-row">
+							<div class="agent-info">
+								<span class="agent-name">{agent.name}</span>
+								<span class="agent-type">{agent.connectorType}</span>
+							</div>
+							<div class="agent-status">
+								<span class="dot" class:disabled={!agent.enabled}></span>
+								<span class="status-label">{agent.enabled ? 'active' : 'disabled'}</span>
+							</div>
+							<div class="agent-row-actions">
+								<button type="button" onclick={() => openEditAgent(agent)}>
+									Edit
+								</button>
+								<button type="button" class="danger" onclick={() => archiveAgent(agent)}>
+									Archive
+								</button>
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
+		{/if}
 	</main>
 </div>
+
+{#if agentFormMode !== 'none'}
+	<AgentForm
+		mode={agentFormMode === 'create' ? 'create' : 'edit'}
+		agent={editingAgent ?? undefined}
+		onSubmit={submitAgentForm}
+		onCancel={() => { agentFormMode = 'none'; editingAgent = null; }}
+	/>
+{/if}
 
 <style>
 	/*
@@ -852,5 +979,108 @@
 		border: 1px solid var(--finn-error);
 		padding: 8px 12px;
 		border-radius: var(--finn-radius-sm);
+	}
+	/* ── Agent management pane ──────────────────────────────────────────── */
+	.agent-actions {
+		margin: 1rem 0;
+	}
+	.agent-actions button.primary {
+		background: var(--finn-accent);
+		border-color: var(--finn-accent);
+		color: #fff;
+		font-weight: 500;
+		padding: 0.4rem 0.9rem;
+		border-radius: var(--finn-radius-sm);
+		border: none;
+		cursor: pointer;
+		transition: background var(--finn-transition-fast), box-shadow var(--finn-transition-fast);
+	}
+	.agent-actions button.primary:hover {
+		background: var(--finn-accent-hover);
+		box-shadow: var(--finn-shadow-glow);
+	}
+	.agent-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+	}
+	.agent-row {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		padding: 0.6rem 0.85rem;
+		background: var(--finn-bg-surface);
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-md);
+		transition: border-color var(--finn-transition-fast);
+	}
+	.agent-row:hover {
+		border-color: var(--finn-border-hover);
+	}
+	.agent-info {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+	}
+	.agent-name {
+		font-weight: 600;
+		color: var(--finn-text-primary);
+		font-size: var(--finn-text-sm);
+	}
+	.agent-type {
+		font-size: var(--finn-text-xs);
+		color: var(--finn-text-muted);
+	}
+	.agent-status {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		font-size: var(--finn-text-xs);
+		color: var(--finn-text-muted);
+	}
+	.dot {
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 50%;
+		background: var(--finn-success);
+		display: inline-block;
+	}
+	.dot.disabled {
+		background: var(--finn-text-disabled);
+	}
+	.status-label {
+		color: var(--finn-text-muted);
+	}
+	.agent-row-actions {
+		display: flex;
+		gap: 0.4rem;
+	}
+	.agent-row-actions button {
+		background: var(--finn-bg-elevated);
+		color: var(--finn-text-secondary);
+		border: 1px solid var(--finn-border);
+		padding: 0.25rem 0.6rem;
+		font-family: inherit;
+		font-size: var(--finn-text-xs);
+		border-radius: var(--finn-radius-sm);
+		cursor: pointer;
+		transition: background var(--finn-transition-fast);
+	}
+	.agent-row-actions button:hover {
+		background: var(--finn-bg-hover);
+	}
+	.agent-row-actions button.danger {
+		color: var(--finn-error);
+		border-color: var(--finn-error);
+	}
+	.agent-row-actions button.danger:hover {
+		background: var(--finn-error-bg);
+	}
+	.note.empty {
+		font-style: italic;
+		color: var(--finn-text-muted);
 	}
 </style>
