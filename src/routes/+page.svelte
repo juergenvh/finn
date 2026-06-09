@@ -1712,13 +1712,7 @@
 		padding: 0;
 		transition: background var(--finn-transition-fast), border-color var(--finn-transition-fast);
 	}
-	/* Cluster of header-side action buttons (add + load). Keeps
-	 * the ↑ and + side-by-side instead of forcing one above the
-	 * other when the sidebar gets narrow. */
-	.section-header-actions {
-		display: flex;
-		gap: 0.25rem;
-	}
+
 	.add-btn:hover {
 		background: var(--finn-bg-hover);
 		border-color: var(--finn-border-hover);
@@ -1795,15 +1789,7 @@
 		color: var(--finn-text-disabled);
 		margin-right: 0.25rem;
 	}
-	.member-row {
-		flex: 1;
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		padding: 0.3rem 0.5rem;
-		font-size: var(--finn-text-sm);
-		color: var(--finn-text-secondary);
-	}
+
 	.dot {
 		width: 0.5rem;
 		height: 0.5rem;
@@ -1815,27 +1801,7 @@
 	.dot.disabled {
 		background: var(--finn-text-disabled);
 	}
-	/**
-	 * Two-line agent row: name on top, connector type underneath in
-	 * a smaller, dimmer style. The previous single-line layout used
-	 * `margin-left: auto` to right-align the connector, which wrapped
-	 * ugly for the longer types (`anthropic-stub`, `openai-compatible`)
-	 * because the row had no width budget left for them.
-	 */
-	.agent-id {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		line-height: 1.15;
-		min-width: 0;
-	}
-	.agent-name {
-		font-size: 0.9rem;
-	}
-	.connector {
-		color: var(--finn-text-muted);
-		font-size: var(--finn-text-xs);
-	}
+
 
 	.filter-row {
 		display: flex;
