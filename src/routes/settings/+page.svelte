@@ -517,7 +517,7 @@
 	}
 
 	$effect(() => {
-		if (selected === 'global') {
+		if (selected === 'global' || selected === 'agents') {
 			channelDetail = null;
 			editChannel = null;
 		} else if (selected) {
