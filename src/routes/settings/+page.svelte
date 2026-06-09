@@ -826,18 +826,6 @@
 		cursor: not-allowed;
 	}
 
-	.actions button.primary {
-		background: var(--finn-accent);
-		border-color: var(--finn-accent);
-		color: #fff;
-		font-weight: 500;
-	}
-
-	.actions button.primary:hover:not(:disabled) {
-		background: var(--finn-accent-hover);
-		box-shadow: var(--finn-shadow-glow);
-	}
-
 	.actions button.secondary {
 		background: transparent;
 		color: var(--finn-text-secondary);
