@@ -611,7 +611,7 @@
 		position: relative;
 		max-width: 80%;
 		padding: 0.55rem 0.75rem;
-		border-radius: 10px;
+		border-radius: var(--finn-radius-md);
 		border-left: 3px solid transparent;
 	}
 	.bubble.hidden-msg {
@@ -708,7 +708,7 @@
 		 * doesn't reflow the body when streaming flips off. */
 		display: inline-block;
 		margin-left: 1px;
-		color: var(--finn-text-secondary);
+		color: var(--finn-accent);
 		animation: cursor-blink 1.05s steps(2, end) infinite;
 	}
 	@keyframes cursor-blink {
@@ -735,7 +735,7 @@
 	.footer {
 		margin-top: 0.5rem;
 		padding-top: 0.4rem;
-		border-top: 1px solid rgba(255, 255, 255, 0.06);
+		border-top: 1px solid var(--finn-border);
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0 0.6rem;
@@ -761,7 +761,7 @@
 	.header {
 		padding-bottom: 0.35rem;
 		margin-bottom: 0.4rem;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+		border-bottom: 1px solid var(--finn-border);
 	}
 	.header-main {
 		display: flex;
@@ -786,9 +786,12 @@
 		 * size as the timestamp, muted-but-readable colour. The
 		 * leading mid-dot is part of the badge text so the dot's
 		 * spacing is governed by gap, not a separator element. */
-		color: var(--finn-text-secondary);
+		color: var(--finn-accent);
 		font-size: 0.78rem;
 		letter-spacing: 0.01em;
+		background: var(--finn-accent-soft);
+		border-radius: var(--finn-radius-full);
+		padding: 0.1rem 0.4rem;
 	}
 	.disclosure-caret {
 		/* Plain text-like button. No border, no background; matches
@@ -815,6 +818,7 @@
 		margin-top: 0.4rem;
 		padding: 0.4rem 0.55rem;
 		background: var(--finn-bg-hover);
+		border: 1px solid var(--finn-border);
 		border-radius: var(--finn-radius-sm);
 		font-size: 0.72rem;
 		line-height: 1.4;
@@ -865,7 +869,7 @@
 		animation: stream-pulse 1.4s ease-in-out infinite;
 	}
 	.stream-done {
-		color: var(--finn-text-disabled);
+		color: var(--finn-success);
 	}
 	.stream-errored {
 		color: var(--finn-error);
@@ -883,7 +887,7 @@
 		 * flush to its right — the visual we want. */
 		margin-left: auto;
 		padding: 0.1rem 0.45rem;
-		border-radius: 9999px;
+		border-radius: var(--finn-radius-full);
 		font-size: 0.7rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
@@ -893,12 +897,12 @@
 		color: var(--finn-warning);
 	}
 	.badge.approved {
-		background: var(--finn-accent-soft);
-		color: var(--finn-accent-hover);
-	}
-	.badge.routed {
 		background: rgba(52, 211, 153, 0.12);
 		color: var(--finn-success);
+	}
+	.badge.routed {
+		background: var(--finn-accent-soft);
+		color: var(--finn-accent);
 	}
 	.badge.rejected {
 		background: var(--finn-error-bg);
@@ -1076,7 +1080,7 @@
 	.body-rich :global(.mermaid-rendered) {
 		margin: 0.5em 0;
 		overflow-x: auto;
-		background: rgba(0, 0, 0, 0.18);
+		background: var(--finn-bg-elevated);
 		border-radius: 5px;
 		padding: 0.6em;
 	}
@@ -1110,8 +1114,8 @@
 		gap: 0.2em;
 		margin: 0.4em 0;
 		padding: 0.4em 0.6em;
-		border-radius: 4px;
-		background: rgba(0, 0, 0, 0.18);
+		border-radius: var(--finn-radius-sm);
+		background: var(--finn-bg-elevated);
 		max-width: 100%;
 	}
 	.body-rich :global(.image-fallback .image-fallback-source) {
@@ -1123,7 +1127,7 @@
 	}
 	.body-rich :global(.image-fallback .image-error-caption) {
 		font-size: 0.7rem;
-		color: #fca5a5;
+		color: var(--finn-error);
 	}
 
 	/* Inline error caption shown when Mermaid parse / render fails.
@@ -1133,8 +1137,8 @@
 		margin-top: 0.3em;
 		padding: 0.25em 0.55em;
 		border-radius: 3px;
-		background: rgba(127, 29, 29, 0.25);
-		color: #fca5a5;
+		background: var(--finn-error-bg);
+		color: var(--finn-error);
 		font-size: 0.72rem;
 		font-family: inherit;
 	}
@@ -1144,14 +1148,14 @@
 	 * no underline so they don't compete with regular markdown
 	 * links. */
 	.body-rich :global(span.mention) {
-		color: #38bdf8;
-		background: rgba(56, 189, 248, 0.12);
+		color: var(--finn-accent);
+		background: var(--finn-accent-soft);
 		padding: 0 0.25em;
 		border-radius: 3px;
 		font-weight: 500;
 	}
 	.body-rich :global(span.mention:hover) {
-		background: rgba(56, 189, 248, 0.22);
+		background: rgba(139, 92, 246, 0.22);
 	}
 
 	.approval {
@@ -1170,7 +1174,7 @@
 		align-items: center;
 	}
 	.lbl {
-		color: #94a3b8;
+		color: var(--finn-text-secondary);
 		text-transform: uppercase;
 		font-size: 0.7rem;
 		letter-spacing: 0.05em;
@@ -1182,7 +1186,7 @@
 		cursor: pointer;
 	}
 	.empty {
-		color: #777;
+		color: var(--finn-text-muted);
 		font-style: italic;
 	}
 
