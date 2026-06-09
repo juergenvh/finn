@@ -128,46 +128,52 @@
 		gap: 0.25rem;
 	}
 	.lbl {
-		font-size: 0.75rem;
-		color: #94a3b8;
+		font-size: var(--finn-text-xs);
+		color: var(--finn-text-secondary);
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
+		font-weight: 500;
 	}
 	input, textarea {
-		background: #0e0e10;
-		border: 1px solid #2a2a30;
-		color: #e8e8ea;
+		background: var(--finn-bg-input);
+		border: 1px solid var(--finn-border);
+		color: var(--finn-text-primary);
 		padding: 0.45rem 0.55rem;
 		font-family: inherit;
-		font-size: 0.95rem;
-		border-radius: 4px;
+		font-size: var(--finn-text-base);
+		border-radius: var(--finn-radius-sm);
+		transition: border-color var(--finn-transition-fast);
+	}
+	input:focus, textarea:focus {
+		outline: none;
+		border-color: var(--finn-accent);
 	}
 	textarea {
 		resize: vertical;
 	}
 	fieldset {
-		border: 1px solid #2a2a30;
-		border-radius: 4px;
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-sm);
 		padding: 0.5rem 0.75rem;
 	}
 	legend {
-		font-size: 0.75rem;
-		color: #94a3b8;
+		font-size: var(--finn-text-xs);
+		color: var(--finn-text-secondary);
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		padding: 0 0.4rem;
 	}
 	.empty {
-		color: #777;
+		color: var(--finn-text-muted);
 		font-style: italic;
-		font-size: 0.85rem;
+		font-size: var(--finn-text-sm);
 	}
 	.error {
-		background: #3a1a1a;
-		color: #fca5a5;
+		background: var(--finn-error-bg);
+		color: var(--finn-error);
 		padding: 0.4rem 0.6rem;
-		border-radius: 4px;
-		font-size: 0.85rem;
+		border-radius: var(--finn-radius-sm);
+		font-size: var(--finn-text-sm);
 	}
 	.actions {
 		display: flex;
@@ -175,18 +181,28 @@
 		gap: 0.5rem;
 	}
 	button {
-		background: #2a2a30;
-		color: #e8e8ea;
-		border: 1px solid #3a3a42;
+		background: var(--finn-bg-surface);
+		color: var(--finn-text-secondary);
+		border: 1px solid var(--finn-border);
 		padding: 0.4rem 0.85rem;
 		font-family: inherit;
-		font-size: 0.9rem;
-		border-radius: 4px;
+		font-size: var(--finn-text-sm);
+		border-radius: var(--finn-radius-sm);
 		cursor: pointer;
+		transition: background var(--finn-transition-fast);
+	}
+	button:hover:not(:disabled) {
+		background: var(--finn-bg-hover);
 	}
 	button.primary {
-		background: #075985;
-		border-color: #0284c7;
+		background: var(--finn-accent);
+		border-color: var(--finn-accent);
+		color: #fff;
+		font-weight: 500;
+	}
+	button.primary:hover:not(:disabled) {
+		background: var(--finn-accent-hover);
+		box-shadow: var(--finn-shadow-glow);
 	}
 	button:disabled {
 		opacity: 0.4;

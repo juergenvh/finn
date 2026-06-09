@@ -205,23 +205,25 @@
 		gap: 0.3rem;
 		min-height: 2.4rem;
 		padding: 0.3rem 0.4rem;
-		background: #0e0e10;
-		border: 1px solid #2a2a30;
-		border-radius: 4px;
+		background: var(--finn-bg-input);
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-sm);
+		transition: border-color var(--finn-transition-fast);
 	}
 	.chip-input:focus-within {
-		border-color: #38bdf8;
+		border-color: var(--finn-accent);
+		box-shadow: 0 0 0 1px var(--finn-accent-glow);
 	}
 
 	.chip {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.25rem;
-		background: rgba(56, 189, 248, 0.12);
-		color: #38bdf8;
+		background: var(--finn-accent-soft);
+		color: var(--finn-accent-hover);
 		padding: 0.15rem 0.45rem 0.15rem 0.55rem;
-		border-radius: 9999px;
-		font-size: 0.85rem;
+		border-radius: var(--finn-radius-full);
+		font-size: var(--finn-text-sm);
 		line-height: 1.2;
 	}
 	.chip-name {
@@ -246,9 +248,9 @@
 		min-width: 8rem;
 		background: transparent;
 		border: 0;
-		color: #e8e8ea;
+		color: var(--finn-text-primary);
 		font-family: inherit;
-		font-size: 0.95rem;
+		font-size: var(--finn-text-base);
 		padding: 0.15rem 0.25rem;
 		outline: none;
 	}

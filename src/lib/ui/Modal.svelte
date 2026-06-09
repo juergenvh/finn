@@ -40,46 +40,48 @@
 	.backdrop {
 		position: fixed;
 		inset: 0;
-		background: rgba(0, 0, 0, 0.55);
+		background: rgba(0, 0, 0, 0.65);
+		backdrop-filter: blur(4px);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		z-index: 100;
 	}
 	.panel {
-		background: #16161a;
-		border: 1px solid #2a2a30;
-		border-radius: 8px;
+		background: var(--finn-bg-elevated);
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-lg);
 		min-width: 480px;
 		max-width: 90vw;
 		max-height: 90vh;
 		display: flex;
 		flex-direction: column;
-		box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+		box-shadow: var(--finn-shadow-lg);
 	}
 	header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		padding: 0.6rem 0.75rem 0.6rem 1rem;
-		border-bottom: 1px solid #2a2a30;
+		border-bottom: 1px solid var(--finn-border);
 	}
 	header h2 {
 		margin: 0;
-		font-size: 0.95rem;
+		font-size: var(--finn-text-base);
 		font-weight: 600;
 	}
 	.close {
 		background: transparent;
 		border: 0;
-		color: #888;
+		color: var(--finn-text-muted);
 		font-size: 1.4rem;
 		line-height: 1;
 		cursor: pointer;
 		padding: 0 0.25rem;
+		transition: color var(--finn-transition-fast);
 	}
 	.close:hover {
-		color: #e8e8ea;
+		color: var(--finn-text-primary);
 	}
 	.body {
 		padding: 1rem;
