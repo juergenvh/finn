@@ -57,10 +57,14 @@
 	let selected = $state<string>('global'); // 'global' | channelId | 'agents'
 
 	// ── Agent management state ──────────────────────────────────────
+	const AGENT_EXPORT_SCHEMA = 'finn-agent-export-v1';
 	let agentsList = $state<AgentInfo[]>([]);
 	let agentsLoading = $state(false);
 	let agentFormMode = $state<'none' | 'create' | 'edit'>('none');
 	let editingAgent = $state<AgentInfo | null>(null);
+	let loadAgentInput: HTMLInputElement | null = $state(null);
+	// channel membership per agent: agentId → array of {id, name}
+	let agentChannels = $state<Record<string, { id: string; name: string }[]>>({}); 
 	let channelDetail = $state<ChannelSettings | null>(null);
 	let loadError = $state<string | null>(null);
 	let saveError = $state<string | null>(null);
@@ -196,6 +200,94 @@
 		if (!confirm(`Archive agent "${agent.name}"? It will no longer dispatch; past messages remain attributed.`)) return;
 		const res = await fetch(`/api/agents/${agent.id}`, { method: 'DELETE' });
 		if (res.ok) await loadAgents();
+	}
+
+	async function toggleAgentEnabled(agent: AgentInfo) {
+		const res = await fetch(`/api/agents/${agent.id}`, {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ enabled: !agent.enabled })
+		});
+		if (res.ok) await loadAgents();
+	}
+
+	async function saveAgentToFile(agent: AgentInfo) {
+		try {
+			const res = await fetch(`/api/agents/${agent.id}`);
+			if (!res.ok) { alert(`failed: ${res.status}`); return; }
+			const row = await res.json();
+			const envelope = {
+				schema: AGENT_EXPORT_SCHEMA,
+				exportedAt: new Date().toISOString(),
+				agent: { name: row.name, connectorType: row.connectorType, config: row.config }
+			};
+			const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url; a.download = `finn-agent-${row.name}.json`;
+			document.body.appendChild(a); a.click();
+			document.body.removeChild(a); URL.revokeObjectURL(url);
+		} catch (err) { alert(`export failed: ${(err as Error).message}`); }
+	}
+
+	function triggerLoadAgent() { loadAgentInput?.click(); }
+
+	async function onLoadAgentFile(ev: Event) {
+		const input = ev.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+		try {
+			const parsed = JSON.parse(await file.text());
+			if (parsed?.schema !== AGENT_EXPORT_SCHEMA) {
+				alert(`unrecognised file (expected schema: ${AGENT_EXPORT_SCHEMA})`);
+				return;
+			}
+			const a = parsed.agent;
+			if (!a?.name || !a?.connectorType || !a?.config) {
+				alert('file missing required fields (name, connectorType, config)');
+				return;
+			}
+			const res = await fetch('/api/agents', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ name: a.name, config: a.config, enabled: true })
+			});
+			if (!res.ok) { alert(`import failed (${res.status}): ${await res.text().then(t => t.slice(0, 200))}`); }
+		} catch (err) { alert(`import failed: ${(err as Error).message}`); }
+		finally { input.value = ''; }
+	}
+
+	async function loadAgentChannels(agentId: string) {
+		// Fetch which channels this agent is a member of by checking all channels
+		const res = await fetch('/api/channels?include_archived=0');
+		if (!res.ok) return;
+		const data = await res.json();
+		const allCh = (data.channels ?? []) as { id: string; name: string }[];
+		// Check membership by loading members for each channel — use parallel fetches
+		const results = await Promise.all(
+			allCh.map(async (ch) => {
+				const r = await fetch(`/api/channels/${ch.id}/members`);
+				if (!r.ok) return null;
+				const d = await r.json();
+				const isMember = (d.members ?? []).some((m: { id: string }) => m.id === agentId);
+				return isMember ? ch : null;
+			})
+		);
+		agentChannels = { ...agentChannels, [agentId]: results.filter(Boolean) as { id: string; name: string }[] };
+	}
+
+	async function addAgentToChannel(agentId: string, channelId: string) {
+		const res = await fetch(`/api/channels/${channelId}/members`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ agent_id: agentId })
+		});
+		if (res.ok) await loadAgentChannels(agentId);
+	}
+
+	async function removeAgentFromChannel(agentId: string, channelId: string) {
+		const res = await fetch(`/api/channels/${channelId}/members/${agentId}`, { method: 'DELETE' });
+		if (res.ok) await loadAgentChannels(agentId);
 	}
 
 	async function loadChannelDetail(channelId: string) {
@@ -713,12 +805,22 @@
 
 		{#if selected === 'agents'}
 			<h1>Agents</h1>
-			<p class="note">All available agents. Agents can be added to channels from the main channel view.</p>
+			<p class="note">Manage all agents. Assign them to channels here or from the channel view.</p>
 
-			<div class="agent-actions">
+			<div class="agent-toolbar">
 				<button type="button" class="primary" onclick={() => { agentFormMode = 'create'; editingAgent = null; }}>
 					+ New Agent
 				</button>
+				<button type="button" title="Import agent from JSON file" onclick={triggerLoadAgent}>
+					⇧ Upload Agent
+				</button>
+				<input
+					bind:this={loadAgentInput}
+					type="file"
+					accept="application/json,.json"
+					style="display:none"
+					onchange={onLoadAgentFile}
+				/>
 			</div>
 
 			{#if agentsLoading}
@@ -728,22 +830,51 @@
 			{:else}
 				<div class="agent-list">
 					{#each agentsList as agent (agent.id)}
-						<div class="agent-row">
-							<div class="agent-info">
-								<span class="agent-name">{agent.name}</span>
-								<span class="agent-type">{agent.connectorType}</span>
+						<div class="agent-card">
+							<div class="agent-card-header">
+								<div class="agent-info">
+									<span class="dot" class:disabled={!agent.enabled}></span>
+									<span class="agent-name">{agent.name}</span>
+									<span class="agent-type">{agent.connectorType}</span>
+								</div>
+								<div class="agent-row-actions">
+									<button type="button" onclick={() => toggleAgentEnabled(agent)}>
+										{agent.enabled ? 'Disable' : 'Enable'}
+									</button>
+									<button type="button" onclick={() => openEditAgent(agent)}>Edit</button>
+									<button type="button" onclick={() => saveAgentToFile(agent)} title="Export agent to JSON">⇩ Save</button>
+									<button type="button" class="danger" onclick={() => archiveAgent(agent)}>Archive</button>
+								</div>
 							</div>
-							<div class="agent-status">
-								<span class="dot" class:disabled={!agent.enabled}></span>
-								<span class="status-label">{agent.enabled ? 'active' : 'disabled'}</span>
-							</div>
-							<div class="agent-row-actions">
-								<button type="button" onclick={() => openEditAgent(agent)}>
-									Edit
-								</button>
-								<button type="button" class="danger" onclick={() => archiveAgent(agent)}>
-									Archive
-								</button>
+
+							<div class="agent-channels">
+								{#if !agentChannels[agent.id]}
+									<button type="button" class="load-channels-btn" onclick={() => loadAgentChannels(agent.id)}>
+										Show channel assignments
+									</button>
+								{:else}
+									<span class="channels-label">Channels:</span>
+									{#each agentChannels[agent.id] as ch (ch.id)}
+										<span class="channel-chip">
+											#{ch.name}
+											<button type="button" class="chip-remove" onclick={() => removeAgentFromChannel(agent.id, ch.id)}
+												title="Remove from #{ch.name}">×</button>
+										</span>
+									{/each}
+									<select
+										class="add-channel-select"
+										onchange={(e) => {
+											const chId = (e.target as HTMLSelectElement).value;
+											if (chId) addAgentToChannel(agent.id, chId);
+											(e.target as HTMLSelectElement).value = '';
+										}}
+									>
+										<option value="">+ Add to channel…</option>
+										{#each channels.filter(ch => !(agentChannels[agent.id] ?? []).some(m => m.id === ch.id)) as ch (ch.id)}
+											<option value={ch.id}>#{ch.name}</option>
+										{/each}
+									</select>
+								{/if}
 							</div>
 						</div>
 					{/each}
@@ -981,50 +1112,69 @@
 		border-radius: var(--finn-radius-sm);
 	}
 	/* ── Agent management pane ──────────────────────────────────────────── */
-	.agent-actions {
+	.agent-toolbar {
+		display: flex;
+		gap: 0.5rem;
 		margin: 1rem 0;
 	}
-	.agent-actions button.primary {
+	.agent-toolbar button {
+		background: var(--finn-bg-surface);
+		color: var(--finn-text-secondary);
+		border: 1px solid var(--finn-border);
+		padding: 0.4rem 0.85rem;
+		font-family: inherit;
+		font-size: var(--finn-text-sm);
+		border-radius: var(--finn-radius-sm);
+		cursor: pointer;
+		transition: background var(--finn-transition-fast);
+	}
+	.agent-toolbar button:hover { background: var(--finn-bg-hover); }
+	.agent-toolbar button.primary {
 		background: var(--finn-accent);
 		border-color: var(--finn-accent);
 		color: #fff;
 		font-weight: 500;
-		padding: 0.4rem 0.9rem;
-		border-radius: var(--finn-radius-sm);
-		border: none;
-		cursor: pointer;
-		transition: background var(--finn-transition-fast), box-shadow var(--finn-transition-fast);
 	}
-	.agent-actions button.primary:hover {
+	.agent-toolbar button.primary:hover {
 		background: var(--finn-accent-hover);
 		box-shadow: var(--finn-shadow-glow);
 	}
 	.agent-list {
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: 0.6rem;
 		margin-top: 0.5rem;
 	}
-	.agent-row {
-		display: flex;
-		align-items: center;
-		gap: 1rem;
-		padding: 0.6rem 0.85rem;
+	.agent-card {
 		background: var(--finn-bg-surface);
 		border: 1px solid var(--finn-border);
 		border-radius: var(--finn-radius-md);
 		transition: border-color var(--finn-transition-fast);
+		overflow: hidden;
 	}
-	.agent-row:hover {
-		border-color: var(--finn-border-hover);
+	.agent-card:hover { border-color: var(--finn-border-hover); }
+	.agent-card-header {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.6rem 0.85rem;
 	}
 	.agent-info {
 		flex: 1;
 		min-width: 0;
 		display: flex;
-		flex-direction: column;
-		gap: 0.1rem;
+		align-items: center;
+		gap: 0.5rem;
 	}
+	.dot {
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 50%;
+		background: var(--finn-success);
+		display: inline-block;
+		flex-shrink: 0;
+	}
+	.dot.disabled { background: var(--finn-text-disabled); }
 	.agent-name {
 		font-weight: 600;
 		color: var(--finn-text-primary);
@@ -1034,51 +1184,78 @@
 		font-size: var(--finn-text-xs);
 		color: var(--finn-text-muted);
 	}
-	.agent-status {
-		display: flex;
-		align-items: center;
-		gap: 0.35rem;
-		font-size: var(--finn-text-xs);
-		color: var(--finn-text-muted);
-	}
-	.dot {
-		width: 0.5rem;
-		height: 0.5rem;
-		border-radius: 50%;
-		background: var(--finn-success);
-		display: inline-block;
-	}
-	.dot.disabled {
-		background: var(--finn-text-disabled);
-	}
-	.status-label {
-		color: var(--finn-text-muted);
-	}
 	.agent-row-actions {
 		display: flex;
-		gap: 0.4rem;
+		gap: 0.35rem;
 	}
 	.agent-row-actions button {
 		background: var(--finn-bg-elevated);
 		color: var(--finn-text-secondary);
 		border: 1px solid var(--finn-border);
-		padding: 0.25rem 0.6rem;
+		padding: 0.2rem 0.55rem;
 		font-family: inherit;
 		font-size: var(--finn-text-xs);
 		border-radius: var(--finn-radius-sm);
 		cursor: pointer;
 		transition: background var(--finn-transition-fast);
 	}
-	.agent-row-actions button:hover {
-		background: var(--finn-bg-hover);
+	.agent-row-actions button:hover { background: var(--finn-bg-hover); }
+	.agent-row-actions button.danger { color: var(--finn-error); border-color: var(--finn-error); }
+	.agent-row-actions button.danger:hover { background: var(--finn-error-bg); }
+	.agent-channels {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.35rem;
+		padding: 0.45rem 0.85rem;
+		border-top: 1px solid var(--finn-border);
+		background: var(--finn-bg-elevated);
 	}
-	.agent-row-actions button.danger {
-		color: var(--finn-error);
-		border-color: var(--finn-error);
+	.channels-label {
+		font-size: var(--finn-text-xs);
+		color: var(--finn-text-muted);
+		margin-right: 0.15rem;
 	}
-	.agent-row-actions button.danger:hover {
-		background: var(--finn-error-bg);
+	.channel-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		background: var(--finn-accent-soft);
+		color: var(--finn-accent-hover);
+		padding: 0.1rem 0.4rem 0.1rem 0.5rem;
+		border-radius: var(--finn-radius-full);
+		font-size: var(--finn-text-xs);
 	}
+	.chip-remove {
+		background: transparent;
+		border: none;
+		color: inherit;
+		cursor: pointer;
+		padding: 0;
+		font-size: 0.9em;
+		opacity: 0.7;
+	}
+	.chip-remove:hover { opacity: 1; }
+	.add-channel-select {
+		background: var(--finn-bg-input);
+		color: var(--finn-text-secondary);
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-sm);
+		padding: 0.15rem 0.4rem;
+		font-family: inherit;
+		font-size: var(--finn-text-xs);
+		cursor: pointer;
+	}
+	.load-channels-btn {
+		background: transparent;
+		border: none;
+		color: var(--finn-text-muted);
+		font-size: var(--finn-text-xs);
+		cursor: pointer;
+		padding: 0;
+		text-decoration: underline;
+	}
+	.load-channels-btn:hover { color: var(--finn-text-secondary); }
 	.note.empty {
 		font-style: italic;
 		color: var(--finn-text-muted);
