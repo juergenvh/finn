@@ -1631,21 +1631,21 @@
 		margin: 0;
 		height: 100%;
 		overflow: hidden;
-		font-family: ui-sans-serif, system-ui, sans-serif;
-		background: #0e0e10;
-		color: #e8e8ea;
+		font-family: var(--finn-font-sans);
+		background: var(--finn-bg-base);
+		color: var(--finn-text-primary);
 	}
 	.root {
 		display: grid;
-		grid-template-columns: 240px 1fr;
+		grid-template-columns: 280px 1fr;
 		height: 100vh;
 		width: 100vw;
 		overflow: hidden;
 	}
 	aside {
-		background: #16161a;
-		border-right: 1px solid #2a2a30;
-		padding: 0.75rem;
+		background: var(--finn-bg-elevated);
+		border-right: 1px solid var(--finn-border);
+		padding: var(--finn-space-4);
 		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
@@ -1664,8 +1664,8 @@
 		 * source is exported at 2× so it stays crisp on retina. */
 		width: 140px;
 		height: 140px;
-		border-radius: 6px;
-		border: 1px solid #2a2a30;
+		border-radius: var(--finn-radius-sm);
+		border: 1px solid var(--finn-border);
 		display: block;
 	}
 	.brand-row {
@@ -1678,11 +1678,11 @@
 		font-size: 1.1rem;
 	}
 	.status {
-		font-size: 0.85rem;
-		color: #555;
+		font-size: var(--finn-text-sm);
+		color: var(--finn-text-disabled);
 	}
 	.status.on {
-		color: #6ee7b7;
+		color: var(--finn-success);
 	}
 	/* Protocol-viewer nav row: matches the .channel-row visual
 	 * weight so the sidebar reads as one consistent list of
@@ -1695,19 +1695,19 @@
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;
-		color: #cbd5e1;
+		color: var(--finn-text-secondary);
 		text-decoration: none;
 		padding: 0.4rem 0.5rem;
-		border-radius: 4px;
-		font-size: 0.95rem;
-		transition: background 120ms;
+		border-radius: var(--finn-radius-sm);
+		font-size: var(--finn-text-base);
+		transition: background var(--finn-transition-fast);
 	}
 	.nav-row:hover {
-		background: #1f1f24;
-		color: #e8e8ea;
+		background: var(--finn-bg-hover);
+		color: var(--finn-text-primary);
 	}
 	.nav-icon {
-		color: #666;
+		color: var(--finn-text-muted);
 	}
 
 	.section {
@@ -1723,10 +1723,11 @@
 		margin-bottom: 0.15rem;
 	}
 	.section-title {
-		color: #666;
+		color: var(--finn-text-muted);
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
-		font-size: 0.7rem;
+		font-size: var(--finn-text-xs);
+		font-weight: 600;
 	}
 	/* Section title rendered as a button so the header is the
 	 * collapse-toggle affordance (#90 item 2). Caret shows the
@@ -1744,25 +1745,26 @@
 		color: inherit;
 	}
 	.section-title-btn:hover {
-		background: #1f1f24;
+		background: var(--finn-bg-hover);
 	}
 	.caret {
-		color: #555;
+		color: var(--finn-text-disabled);
 		font-size: 0.65rem;
 		width: 0.7rem;
 		display: inline-block;
 	}
 	.add-btn {
-		background: transparent;
-		border: 1px solid #2a2a30;
-		color: #94a3b8;
+		background: var(--finn-bg-surface);
+		border: 1px solid var(--finn-border);
+		color: var(--finn-text-secondary);
 		width: 1.4rem;
 		height: 1.4rem;
 		line-height: 1;
 		font-size: 1rem;
-		border-radius: 4px;
+		border-radius: var(--finn-radius-sm);
 		cursor: pointer;
 		padding: 0;
+		transition: background var(--finn-transition-fast), border-color var(--finn-transition-fast);
 	}
 	/* Cluster of header-side action buttons (add + load). Keeps
 	 * the ↑ and + side-by-side instead of forcing one above the
@@ -1772,8 +1774,9 @@
 		gap: 0.25rem;
 	}
 	.add-btn:hover {
-		background: #1f1f24;
-		color: #e8e8ea;
+		background: var(--finn-bg-hover);
+		border-color: var(--finn-border-hover);
+		color: var(--finn-text-primary);
 	}
 	.row-wrapper {
 		position: relative;
@@ -1787,22 +1790,22 @@
 		opacity: 0;
 		background: transparent;
 		border: 0;
-		color: #777;
+		color: var(--finn-text-muted);
 		font-size: 1rem;
 		padding: 0 0.4rem;
 		cursor: pointer;
 	}
 	.row-menu-btn:hover {
-		color: #e8e8ea;
+		color: var(--finn-text-primary);
 	}
 	.menu {
 		position: absolute;
 		right: 0;
 		top: 1.8rem;
-		background: #1f1f24;
-		border: 1px solid #2a2a30;
-		border-radius: 4px;
-		box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+		background: var(--finn-bg-surface);
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-md);
+		box-shadow: var(--finn-shadow-md);
 		display: flex;
 		flex-direction: column;
 		min-width: 110px;
@@ -1812,36 +1815,38 @@
 		text-align: left;
 		background: transparent;
 		border: 0;
-		color: #cbd5e1;
+		color: var(--finn-text-secondary);
 		padding: 0.4rem 0.7rem;
 		font-family: inherit;
-		font-size: 0.85rem;
+		font-size: var(--finn-text-sm);
 		cursor: pointer;
 	}
 	.menu button:hover {
-		background: #2a2a30;
+		background: var(--finn-bg-hover);
 	}
 	.channel-row {
 		flex: 1;
 		text-align: left;
 		background: transparent;
-		color: #cbd5e1;
+		color: var(--finn-text-secondary);
 		border: 0;
-		padding: 0.4rem 0.5rem;
+		padding: 0.5rem 0.75rem;
 		font-family: inherit;
-		font-size: 0.95rem;
-		border-radius: 4px;
+		font-size: var(--finn-text-base);
+		border-radius: var(--finn-radius-sm);
 		cursor: pointer;
+		font-weight: 500;
+		transition: background var(--finn-transition-fast), color var(--finn-transition-fast);
 	}
 	.channel-row:hover {
-		background: #1f1f24;
+		background: var(--finn-bg-hover);
 	}
 	.channel-row.active {
-		background: #1f2937;
-		color: #f1f5f9;
+		background: var(--finn-accent-soft);
+		color: var(--finn-accent-hover);
 	}
 	.hash {
-		color: #555;
+		color: var(--finn-text-disabled);
 		margin-right: 0.25rem;
 	}
 	.member-row {
@@ -1850,19 +1855,19 @@
 		align-items: center;
 		gap: 0.5rem;
 		padding: 0.3rem 0.5rem;
-		font-size: 0.9rem;
-		color: #cbd5e1;
+		font-size: var(--finn-text-sm);
+		color: var(--finn-text-secondary);
 	}
 	.dot {
 		width: 0.5rem;
 		height: 0.5rem;
 		border-radius: 50%;
-		background: #6ee7b7;
+		background: var(--finn-success);
 		display: inline-block;
 		flex-shrink: 0;
 	}
 	.dot.disabled {
-		background: #555;
+		background: var(--finn-text-disabled);
 	}
 	/**
 	 * Two-line agent row: name on top, connector type underneath in
@@ -1882,8 +1887,8 @@
 		font-size: 0.9rem;
 	}
 	.connector {
-		color: #64748b;
-		font-size: 0.7rem;
+		color: var(--finn-text-muted);
+		font-size: var(--finn-text-xs);
 	}
 
 	.filter-row {
@@ -1891,12 +1896,12 @@
 		align-items: center;
 		gap: 0.5rem;
 		padding: 0.2rem 0.5rem;
-		font-size: 0.85rem;
-		color: #cbd5e1;
+		font-size: var(--finn-text-sm);
+		color: var(--finn-text-secondary);
 		cursor: pointer;
 	}
 	.filter-row input[type='checkbox'] {
-		accent-color: #38bdf8;
+		accent-color: var(--finn-accent);
 	}
 	.filter-name {
 		flex: 1;
@@ -1911,8 +1916,9 @@
 	}
 	.main header {
 		flex: 0 0 auto;
-		padding: 0.75rem 1rem;
-		border-bottom: 1px solid #2a2a30;
+		padding: 0.75rem var(--finn-space-4);
+		border-bottom: 1px solid var(--finn-border);
+		background: var(--finn-bg-elevated);
 	}
 	.channel-header-row {
 		display: flex;
@@ -1929,12 +1935,12 @@
 		font-weight: 600;
 	}
 	.channel-name.muted {
-		color: #777;
+		color: var(--finn-text-muted);
 		font-weight: 400;
 	}
 	.channel-desc {
-		color: #888;
-		font-size: 0.85rem;
+		color: var(--finn-text-muted);
+		font-size: var(--finn-text-sm);
 		margin-top: 0.15rem;
 	}
 	.channel-actions {
@@ -1943,93 +1949,106 @@
 		gap: 0.5rem;
 	}
 	.search {
-		background: #0e0e10;
-		border: 1px solid #2a2a30;
-		color: #e8e8ea;
+		background: var(--finn-bg-input);
+		border: 1px solid var(--finn-border);
+		color: var(--finn-text-primary);
 		padding: 0.35rem 0.55rem;
 		font-family: inherit;
-		font-size: 0.85rem;
-		border-radius: 4px;
+		font-size: var(--finn-text-sm);
+		border-radius: var(--finn-radius-sm);
 		width: 14rem;
+		transition: border-color var(--finn-transition-fast);
+	}
+	.search:focus {
+		border-color: var(--finn-accent);
 	}
 	.export-btn {
-		background: #2a2a30;
-		color: #e8e8ea;
-		border: 1px solid #3a3a42;
+		background: var(--finn-bg-surface);
+		color: var(--finn-text-secondary);
+		border: 1px solid var(--finn-border);
 		padding: 0.35rem 0.7rem;
 		font-family: inherit;
-		font-size: 0.85rem;
-		border-radius: 4px;
+		font-size: var(--finn-text-sm);
+		border-radius: var(--finn-radius-sm);
 		cursor: pointer;
+		transition: background var(--finn-transition-fast), border-color var(--finn-transition-fast);
+	}
+	.export-btn:hover {
+		background: var(--finn-bg-hover);
+		border-color: var(--finn-border-hover);
 	}
 	.settings-link {
 		/* Channel-scoped settings shortcut (ADR-0019). Sits next to
 		   Export, opens /settings with the channel pre-selected via
 		   URL fragment. Visual matches export-btn so the action bar
 		   stays cohesive. */
-		background: #2a2a30;
-		color: #e8e8ea;
-		border: 1px solid #3a3a42;
+		background: var(--finn-bg-surface);
+		color: var(--finn-text-secondary);
+		border: 1px solid var(--finn-border);
 		padding: 0.35rem 0.6rem;
 		font-family: inherit;
-		font-size: 0.95rem;
-		border-radius: 4px;
+		font-size: var(--finn-text-base);
+		border-radius: var(--finn-radius-sm);
 		text-decoration: none;
 		display: inline-flex;
 		align-items: center;
 		line-height: 1;
+		transition: background var(--finn-transition-fast), border-color var(--finn-transition-fast);
 	}
 	.settings-link:hover {
-		background: #34343c;
+		background: var(--finn-bg-hover);
+		border-color: var(--finn-border-hover);
 	}
 	.error {
-		background: #3a1a1a;
-		color: #fca5a5;
+		background: var(--finn-error-bg);
+		color: var(--finn-error);
 		padding: 0.5rem 1rem;
-		font-size: 0.9rem;
+		font-size: var(--finn-text-sm);
+		border-radius: var(--finn-radius-sm);
 	}
 	main {
 		flex: 1 1 auto;
 		min-height: 0;
 		overflow-y: auto;
-		padding: 1rem;
+		padding: var(--finn-space-4);
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: var(--finn-space-3);
 	}
 	.load-older {
 		align-self: center;
 		background: transparent;
-		border: 1px solid #2a2a30;
-		color: #94a3b8;
+		border: 1px solid var(--finn-border);
+		color: var(--finn-text-muted);
 		padding: 0.35rem 0.85rem;
 		font-family: inherit;
-		font-size: 0.8rem;
-		border-radius: 999px;
+		font-size: var(--finn-text-xs);
+		border-radius: var(--finn-radius-full);
 		cursor: pointer;
+		transition: background var(--finn-transition-fast), color var(--finn-transition-fast);
 	}
 	.load-older:hover {
-		background: #1f1f24;
-		color: #e8e8ea;
+		background: var(--finn-bg-hover);
+		color: var(--finn-text-secondary);
 	}
 	.search-meta {
-		color: #94a3b8;
-		font-size: 0.8rem;
+		color: var(--finn-text-secondary);
+		font-size: var(--finn-text-sm);
 		font-style: italic;
 		text-align: center;
 	}
 	.search-meta code {
-		background: #1f1f24;
+		background: var(--finn-bg-hover);
 		padding: 0.05rem 0.35rem;
-		border-radius: 3px;
+		border-radius: var(--finn-radius-sm);
 	}
 	footer {
 		flex: 0 0 auto;
 		display: flex;
 		gap: 0.5rem;
-		padding: 0.75rem 1rem;
-		border-top: 1px solid #2a2a30;
-		background: #0e0e10;
+		padding: var(--finn-space-3) var(--finn-space-4);
+		border-top: 1px solid var(--finn-border);
+		background: var(--finn-bg-elevated);
 	}
 	.composer {
 		flex: 1;
@@ -2038,34 +2057,37 @@
 	textarea {
 		width: 100%;
 		box-sizing: border-box;
-		/* Subtle distinct background so the input region reads as
-		 * its own surface against the chat scroll (#1c1c22 sits one
-		 * shade lighter than #16161a). Issue #89. */
-		background: #1c1c22;
-		border: 1px solid #2a2a30;
-		color: #e8e8ea;
+		background: var(--finn-bg-input);
+		border: 1px solid var(--finn-border);
+		color: var(--finn-text-primary);
 		padding: 0.5rem;
 		font-family: inherit;
-		font-size: 0.95rem;
-		border-radius: 4px;
-		/* Resize is driven by autosizeComposer() in JS up to the cap.
-		 * Disable the manual resize handle to avoid the two interfering. */
+		font-size: var(--finn-text-base);
+		border-radius: var(--finn-radius-md);
 		resize: none;
 		min-height: 2.5rem;
 		overflow-y: hidden;
+		transition: border-color var(--finn-transition-fast);
 	}
 	textarea:focus {
 		outline: none;
-		border-color: #475569;
+		border-color: var(--finn-accent);
+		box-shadow: 0 0 0 3px var(--finn-accent-glow);
 	}
 	footer button {
-		background: #2a2a30;
-		color: #e8e8ea;
-		border: 1px solid #3a3a42;
-		padding: 0.5rem 1rem;
+		background: var(--finn-accent);
+		color: #fff;
+		border: none;
+		padding: 0.5rem 1.1rem;
 		font-family: inherit;
-		border-radius: 4px;
+		font-weight: 500;
+		border-radius: var(--finn-radius-sm);
 		cursor: pointer;
+		transition: background var(--finn-transition-fast), box-shadow var(--finn-transition-fast);
+	}
+	footer button:hover:not(:disabled) {
+		background: var(--finn-accent-hover);
+		box-shadow: var(--finn-shadow-glow);
 	}
 	footer button:disabled {
 		opacity: 0.4;

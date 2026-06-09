@@ -611,12 +611,12 @@
 		position: relative;
 		max-width: 80%;
 		padding: 0.55rem 0.75rem;
-		border-radius: 10px;
+		border-radius: var(--finn-radius-md);
 		border-left: 3px solid transparent;
 	}
 	.bubble.hidden-msg {
 		opacity: 0.45;
-		border-left-color: #475569;
+		border-left-color: var(--finn-text-disabled);
 		border-left-style: dashed;
 	}
 	.toolbar {
@@ -635,57 +635,59 @@
 	.toolbar-btn {
 		background: transparent;
 		border: 0;
-		color: #475569;
+		color: var(--finn-text-disabled);
 		font-size: 0.9rem;
 		line-height: 1;
 		cursor: pointer;
 		padding: 0.1rem 0.35rem;
-		border-radius: 3px;
+		border-radius: var(--finn-radius-sm);
 	}
 	.toolbar-btn:hover {
-		color: #cbd5e1;
-		background: rgba(255, 255, 255, 0.05);
+		color: var(--finn-text-primary);
+		background: var(--finn-bg-hover);
 	}
 
 	/* The forward picker reuses .approval's layout entirely; no
 	 * extra styling needed here — .forward-picker is just a hook
 	 * for any future visual differentiation. */
 	.bubble.user {
-		background: #1e3a5f;
+		background: var(--finn-accent-soft);
+		border: 1px solid var(--finn-accent-glow);
 		border-top-right-radius: 2px;
 	}
 	.bubble.agent {
-		background: #1f3a2a;
+		background: var(--finn-bg-surface);
+		border: 1px solid var(--finn-border);
 		border-top-left-radius: 2px;
 	}
 	.bubble.system {
 		background: transparent;
-		color: #777;
+		color: var(--finn-text-muted);
 		font-style: italic;
-		font-size: 0.85rem;
+		font-size: var(--finn-text-sm);
 		max-width: 60%;
 		text-align: center;
 	}
 
 	.bubble.status-pending {
-		border-left-color: #f59e0b;
+		border-left-color: var(--finn-warning);
 	}
 	.bubble.status-approved {
-		border-left-color: #38bdf8;
+		border-left-color: var(--finn-accent);
 	}
 	.bubble.status-routed {
-		border-left-color: #6ee7b7;
+		border-left-color: var(--finn-success);
 	}
 	.bubble.status-rejected {
-		border-left-color: #7f1d1d;
-		background: #1a1416;
+		border-left-color: var(--finn-error);
+		background: var(--finn-error-bg);
 		opacity: 0.6;
 	}
 	.bubble.status-rejected .body {
-		color: #5a5a5e;
+		color: var(--finn-text-disabled);
 	}
 	.bubble.status-rejected .who {
-		color: #6b6b70;
+		color: var(--finn-text-disabled);
 	}
 
 	.bubble.streaming {
@@ -693,11 +695,11 @@
 		 * leftmost edge gets a faint accent so a streaming bubble
 		 * is visually distinct from a settled one even while no new
 		 * tokens are being appended. */
-		border-left-color: #38bdf8;
+		border-left-color: var(--finn-accent);
 	}
 	.bubble.errored {
-		border-left-color: #b91c1c;
-		background: #1f1416;
+		border-left-color: var(--finn-error);
+		background: var(--finn-error-bg);
 	}
 
 	.cursor {
@@ -706,7 +708,7 @@
 		 * doesn't reflow the body when streaming flips off. */
 		display: inline-block;
 		margin-left: 1px;
-		color: #94a3b8;
+		color: var(--finn-accent);
 		animation: cursor-blink 1.05s steps(2, end) infinite;
 	}
 	@keyframes cursor-blink {
@@ -717,9 +719,9 @@
 	.error-line {
 		margin-top: 0.5rem;
 		padding: 0.4rem 0.55rem;
-		border-radius: 4px;
-		background: #2a1416;
-		color: #fecaca;
+		border-radius: var(--finn-radius-sm);
+		background: var(--finn-error-bg);
+		color: var(--finn-error);
 		font-size: 0.78rem;
 		line-height: 1.4;
 		display: flex;
@@ -727,18 +729,18 @@
 		align-items: flex-start;
 	}
 	.error-icon {
-		color: #fca5a5;
+		color: var(--finn-error);
 	}
 
 	.footer {
 		margin-top: 0.5rem;
 		padding-top: 0.4rem;
-		border-top: 1px solid rgba(255, 255, 255, 0.06);
+		border-top: 1px solid var(--finn-border);
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0 0.6rem;
-		color: #64748b;
-		font-size: 0.7rem;
+		color: var(--finn-text-muted);
+		font-size: var(--finn-text-xs);
 		line-height: 1.4;
 	}
 	.footer-item {
@@ -747,10 +749,10 @@
 		align-items: baseline;
 	}
 	.tokens-detail {
-		color: #475569;
+		color: var(--finn-text-disabled);
 	}
 	.tok-arrow {
-		color: #475569;
+		color: var(--finn-text-disabled);
 		display: inline-block;
 		width: 0.8em;
 		text-align: center;
@@ -759,7 +761,7 @@
 	.header {
 		padding-bottom: 0.35rem;
 		margin-bottom: 0.4rem;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+		border-bottom: 1px solid var(--finn-border);
 	}
 	.header-main {
 		display: flex;
@@ -769,12 +771,12 @@
 	}
 	.header-meta {
 		margin-top: 0.15rem;
-		color: #64748b;
-		font-size: 0.7rem;
+		color: var(--finn-text-muted);
+		font-size: var(--finn-text-xs);
 		line-height: 1.3;
 	}
 	.who {
-		color: #e2e8f0;
+		color: var(--finn-text-primary);
 		font-weight: 600;
 		text-transform: lowercase;
 	}
@@ -784,9 +786,12 @@
 		 * size as the timestamp, muted-but-readable colour. The
 		 * leading mid-dot is part of the badge text so the dot's
 		 * spacing is governed by gap, not a separator element. */
-		color: #94a3b8;
+		color: var(--finn-accent);
 		font-size: 0.78rem;
 		letter-spacing: 0.01em;
+		background: var(--finn-accent-soft);
+		border-radius: var(--finn-radius-full);
+		padding: 0.1rem 0.4rem;
 	}
 	.disclosure-caret {
 		/* Plain text-like button. No border, no background; matches
@@ -795,28 +800,29 @@
 		background: transparent;
 		border: none;
 		padding: 0 0.15rem;
-		color: #64748b;
+		color: var(--finn-text-muted);
 		font-size: 0.78rem;
 		line-height: 1;
 		cursor: pointer;
 		font-family: inherit;
 	}
 	.disclosure-caret:hover {
-		color: #cbd5e1;
+		color: var(--finn-text-secondary);
 	}
 	.disclosure-caret:focus-visible {
-		outline: 1px solid #38bdf8;
+		outline: 1px solid var(--finn-accent);
 		outline-offset: 1px;
 		border-radius: 2px;
 	}
 	.disclosure-panel {
 		margin-top: 0.4rem;
 		padding: 0.4rem 0.55rem;
-		background: rgba(0, 0, 0, 0.18);
-		border-radius: 4px;
+		background: var(--finn-bg-hover);
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-sm);
 		font-size: 0.72rem;
 		line-height: 1.4;
-		color: #94a3b8;
+		color: var(--finn-text-secondary);
 	}
 	.disclosure-panel dl {
 		margin: 0;
@@ -825,24 +831,24 @@
 		gap: 0.15rem 0.6rem;
 	}
 	.disclosure-panel dt {
-		color: #64748b;
+		color: var(--finn-text-muted);
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		font-size: 0.65rem;
 	}
 	.disclosure-panel dd {
 		margin: 0;
-		color: #cbd5e1;
+		color: var(--finn-text-secondary);
 		word-break: break-all;
 	}
 	.disclosure-panel code {
-		background: #0e0e10;
+		background: var(--finn-bg-base);
 		padding: 0.05rem 0.3rem;
-		border-radius: 3px;
+		border-radius: var(--finn-radius-sm);
 		font-size: 0.7rem;
 	}
 	.ts {
-		color: #64748b;
+		color: var(--finn-text-muted);
 		font-size: 0.75rem;
 	}
 	.stream-icon {
@@ -859,14 +865,14 @@
 		cursor: default;
 	}
 	.stream-streaming {
-		color: #38bdf8;
+		color: var(--finn-accent);
 		animation: stream-pulse 1.4s ease-in-out infinite;
 	}
 	.stream-done {
-		color: #475569;
+		color: var(--finn-success);
 	}
 	.stream-errored {
-		color: #fca5a5;
+		color: var(--finn-error);
 	}
 	@keyframes stream-pulse {
 		0%, 100% { opacity: 0.55; }
@@ -881,26 +887,26 @@
 		 * flush to its right — the visual we want. */
 		margin-left: auto;
 		padding: 0.1rem 0.45rem;
-		border-radius: 9999px;
+		border-radius: var(--finn-radius-full);
 		font-size: 0.7rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 	}
 	.badge.pending {
-		background: #78350f;
-		color: #fde68a;
+		background: rgba(251, 191, 36, 0.12);
+		color: var(--finn-warning);
 	}
 	.badge.approved {
-		background: #075985;
-		color: #bae6fd;
+		background: rgba(52, 211, 153, 0.12);
+		color: var(--finn-success);
 	}
 	.badge.routed {
-		background: #064e3b;
-		color: #a7f3d0;
+		background: var(--finn-accent-soft);
+		color: var(--finn-accent);
 	}
 	.badge.rejected {
-		background: #7f1d1d;
-		color: #fecaca;
+		background: var(--finn-error-bg);
+		color: var(--finn-error);
 	}
 
 	.body {
@@ -953,7 +959,7 @@
 	}
 	.body-rich :global(strong) {
 		font-weight: 700;
-		color: #f1f5f9;
+		color: var(--finn-text-primary);
 	}
 	.body-rich :global(em) {
 		font-style: italic;
@@ -963,38 +969,37 @@
 		opacity: 0.7;
 	}
 	.body-rich :global(a) {
-		color: #38bdf8;
+		color: var(--finn-accent);
 		text-decoration: underline;
 		text-underline-offset: 2px;
 	}
 	.body-rich :global(a:hover) {
-		color: #7dd3fc;
+		color: var(--finn-accent-hover);
 	}
 
-	/* Inline code: subtle background, no border. Matches the
-	 * surrounding body monospace stack so the only visual cue is
-	 * the background swatch. */
+	/* Inline code: elevated background + accent tint. */
 	.body-rich :global(code) {
-		background: rgba(255, 255, 255, 0.06);
-		padding: 0.05em 0.3em;
-		border-radius: 3px;
-		font-size: 0.95em;
+		background: var(--finn-bg-elevated);
+		color: var(--finn-accent-hover);
+		padding: 0.15em 0.35em;
+		border-radius: var(--finn-radius-sm);
+		font-family: var(--finn-font-mono);
+		font-size: 0.9em;
 	}
 
-	/* Fenced code blocks: distinct background block, internal
-	 * <pre> whitespace so multi-line code keeps its formatting,
-	 * horizontal scroll for over-wide lines (no soft-wrap on code
-	 * — wrapping a JSON line mid-string is misleading). */
+	/* Fenced code blocks */
 	.body-rich :global(pre) {
-		background: rgba(0, 0, 0, 0.35);
-		padding: 0.55em 0.75em;
-		border-radius: 5px;
+		background: var(--finn-bg-elevated);
+		border: 1px solid var(--finn-border);
+		padding: 0.75em 1em;
+		border-radius: var(--finn-radius-md);
 		margin: 0.5em 0;
 		overflow-x: auto;
 		line-height: 1.4;
 	}
 	.body-rich :global(pre code) {
 		background: transparent;
+		color: var(--finn-text-primary);
 		padding: 0;
 		border-radius: 0;
 		white-space: pre;
@@ -1018,8 +1023,8 @@
 	.body-rich :global(blockquote) {
 		margin: 0.5em 0;
 		padding: 0.1em 0.75em;
-		border-left: 3px solid #475569;
-		color: #cbd5e1;
+		border-left: 3px solid var(--finn-accent);
+		color: var(--finn-text-secondary);
 		font-style: italic;
 	}
 
@@ -1031,7 +1036,7 @@
 	.body-rich :global(h6) {
 		margin: 0.5em 0 0.3em;
 		font-weight: 600;
-		color: #f1f5f9;
+		color: var(--finn-text-primary);
 	}
 	.body-rich :global(h1) { font-size: 1.15em; }
 	.body-rich :global(h2) { font-size: 1.08em; }
@@ -1047,17 +1052,17 @@
 	}
 	.body-rich :global(th),
 	.body-rich :global(td) {
-		border: 1px solid #2a2a30;
+		border: 1px solid var(--finn-border);
 		padding: 0.25em 0.5em;
 		text-align: left;
 	}
 	.body-rich :global(th) {
-		background: rgba(255, 255, 255, 0.04);
+		background: var(--finn-bg-hover);
 		font-weight: 600;
 	}
 	.body-rich :global(hr) {
 		border: 0;
-		border-top: 1px solid #2a2a30;
+		border-top: 1px solid var(--finn-border);
 		margin: 0.7em 0;
 	}
 
@@ -1075,7 +1080,7 @@
 	.body-rich :global(.mermaid-rendered) {
 		margin: 0.5em 0;
 		overflow-x: auto;
-		background: rgba(0, 0, 0, 0.18);
+		background: var(--finn-bg-elevated);
 		border-radius: 5px;
 		padding: 0.6em;
 	}
@@ -1109,8 +1114,8 @@
 		gap: 0.2em;
 		margin: 0.4em 0;
 		padding: 0.4em 0.6em;
-		border-radius: 4px;
-		background: rgba(0, 0, 0, 0.18);
+		border-radius: var(--finn-radius-sm);
+		background: var(--finn-bg-elevated);
 		max-width: 100%;
 	}
 	.body-rich :global(.image-fallback .image-fallback-source) {
@@ -1122,7 +1127,7 @@
 	}
 	.body-rich :global(.image-fallback .image-error-caption) {
 		font-size: 0.7rem;
-		color: #fca5a5;
+		color: var(--finn-error);
 	}
 
 	/* Inline error caption shown when Mermaid parse / render fails.
@@ -1132,8 +1137,8 @@
 		margin-top: 0.3em;
 		padding: 0.25em 0.55em;
 		border-radius: 3px;
-		background: rgba(127, 29, 29, 0.25);
-		color: #fca5a5;
+		background: var(--finn-error-bg);
+		color: var(--finn-error);
 		font-size: 0.72rem;
 		font-family: inherit;
 	}
@@ -1143,20 +1148,20 @@
 	 * no underline so they don't compete with regular markdown
 	 * links. */
 	.body-rich :global(span.mention) {
-		color: #38bdf8;
-		background: rgba(56, 189, 248, 0.12);
+		color: var(--finn-accent);
+		background: var(--finn-accent-soft);
 		padding: 0 0.25em;
 		border-radius: 3px;
 		font-weight: 500;
 	}
 	.body-rich :global(span.mention:hover) {
-		background: rgba(56, 189, 248, 0.22);
+		background: rgba(139, 92, 246, 0.22);
 	}
 
 	.approval {
 		margin-top: 0.6rem;
 		padding-top: 0.55rem;
-		border-top: 1px dashed #2a2a30;
+		border-top: 1px dashed var(--finn-border);
 		display: flex;
 		flex-direction: column;
 		gap: 0.5rem;
@@ -1169,7 +1174,7 @@
 		align-items: center;
 	}
 	.lbl {
-		color: #94a3b8;
+		color: var(--finn-text-secondary);
 		text-transform: uppercase;
 		font-size: 0.7rem;
 		letter-spacing: 0.05em;
@@ -1181,7 +1186,7 @@
 		cursor: pointer;
 	}
 	.empty {
-		color: #777;
+		color: var(--finn-text-muted);
 		font-style: italic;
 	}
 
@@ -1190,26 +1195,33 @@
 		gap: 0.5rem;
 	}
 	button {
-		background: #2a2a30;
-		color: #e8e8ea;
-		border: 1px solid #3a3a42;
+		background: var(--finn-bg-surface);
+		color: var(--finn-text-secondary);
+		border: 1px solid var(--finn-border);
 		padding: 0.35rem 0.75rem;
 		font-family: inherit;
-		font-size: 0.85rem;
-		border-radius: 4px;
+		font-size: var(--finn-text-sm);
+		border-radius: var(--finn-radius-sm);
 		cursor: pointer;
+		transition: background var(--finn-transition-fast);
+	}
+	button:hover:not(:disabled) {
+		background: var(--finn-bg-hover);
+		border-color: var(--finn-border-hover);
 	}
 	button:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
 	}
 	button.approve {
-		background: #075985;
-		border-color: #0284c7;
+		background: rgba(52, 211, 153, 0.15);
+		border-color: var(--finn-success);
+		color: var(--finn-success);
 	}
 	button.reject {
-		background: #7f1d1d;
-		border-color: #b91c1c;
+		background: var(--finn-error-bg);
+		border-color: var(--finn-error);
+		color: var(--finn-error);
 	}
 
 	.reject-row {
@@ -1219,13 +1231,13 @@
 	}
 	.reject-row input {
 		flex: 1;
-		background: #16161a;
-		border: 1px solid #2a2a30;
-		color: #e8e8ea;
+		background: var(--finn-bg-input);
+		border: 1px solid var(--finn-border);
+		color: var(--finn-text-primary);
 		padding: 0.35rem 0.5rem;
 		font-family: inherit;
-		font-size: 0.9rem;
-		border-radius: 4px;
+		font-size: var(--finn-text-sm);
+		border-radius: var(--finn-radius-sm);
 	}
 
 </style>
