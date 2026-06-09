@@ -1631,9 +1631,9 @@
 		margin: 0;
 		height: 100%;
 		overflow: hidden;
-		font-family: var(--finn-font-sans);
-		background: var(--finn-bg-base);
-		color: var(--finn-text-primary);
+		font-family: ui-sans-serif, system-ui, sans-serif;
+		background: #0e0e10;
+		color: #e8e8ea;
 	}
 	.root {
 		display: grid;
@@ -2010,10 +2010,10 @@
 		flex: 1 1 auto;
 		min-height: 0;
 		overflow-y: auto;
-		padding: var(--finn-space-4);
+		padding: 1rem;
 		display: flex;
 		flex-direction: column;
-		gap: var(--finn-space-3);
+		gap: 0.5rem;
 	}
 	.load-older {
 		align-self: center;
@@ -2032,8 +2032,8 @@
 		color: var(--finn-text-secondary);
 	}
 	.search-meta {
-		color: var(--finn-text-secondary);
-		font-size: var(--finn-text-sm);
+		color: #94a3b8;
+		font-size: 0.8rem;
 		font-style: italic;
 		text-align: center;
 	}
@@ -2072,7 +2072,6 @@
 	textarea:focus {
 		outline: none;
 		border-color: var(--finn-accent);
-		box-shadow: 0 0 0 3px var(--finn-accent-glow);
 	}
 	footer button {
 		background: var(--finn-accent);
