@@ -74,10 +74,10 @@
 	.popup {
 		position: absolute;
 		left: 0.75rem;
-		background: #1f1f24;
-		border: 1px solid #2a2a30;
-		border-radius: 6px;
-		box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+		background: var(--finn-bg-surface);
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-md);
+		box-shadow: var(--finn-shadow-md);
 		max-height: 14rem;
 		min-width: 220px;
 		overflow-y: auto;
@@ -98,34 +98,35 @@
 		text-align: left;
 		background: transparent;
 		border: 0;
-		color: #cbd5e1;
-		padding: 0.4rem 0.6rem;
+		color: var(--finn-text-secondary);
+		padding: 0.45rem 0.65rem;
 		font-family: inherit;
-		font-size: 0.9rem;
+		font-size: var(--finn-text-sm);
 		cursor: pointer;
+		transition: background var(--finn-transition-fast);
 	}
 	.row:hover,
 	.row.highlighted {
-		background: #2a2a30;
-		color: #f1f5f9;
+		background: var(--finn-bg-hover);
+		color: var(--finn-text-primary);
 	}
 	.dot {
 		width: 0.45rem;
 		height: 0.45rem;
 		border-radius: 50%;
-		background: #6ee7b7;
+		background: var(--finn-success);
 		display: inline-block;
 		flex-shrink: 0;
 	}
 	.dot.disabled {
-		background: #555;
+		background: var(--finn-text-disabled);
 	}
 	.name {
 		font-weight: 500;
 	}
 	.connector {
-		color: #64748b;
-		font-size: 0.75rem;
+		color: var(--finn-text-muted);
+		font-size: var(--finn-text-xs);
 		margin-left: auto;
 	}
 </style>
