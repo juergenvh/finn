@@ -596,6 +596,7 @@
 	.row {
 		display: flex;
 		width: 100%;
+		animation: finn-fade-in 200ms ease both;
 	}
 	.row.user {
 		justify-content: flex-end;
