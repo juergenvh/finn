@@ -20,12 +20,13 @@
 
 	type Theme = 'system' | 'light' | 'dark';
 
+	type ConnectorType = 'openclaw' | 'openai-compatible' | 'anthropic-stub';
 	type AgentInfo = {
 		id: string;
 		name: string;
-		connectorType: string;
+		connectorType: ConnectorType;
 		enabled: boolean;
-		config?: Record<string, unknown>;
+		config: Record<string, unknown>;
 	};
 
 	type Global = {
@@ -45,7 +46,7 @@
 		effective: { kbBudget: number; autoApprove: boolean; roundtripCap: number };
 	};
 
-	type ChannelInfo = { id: string; name: string };
+	type ChannelInfo = { id: string; name: string; description: string | null };
 
 	type WSStateChanged = {
 		type: 'state_changed';
