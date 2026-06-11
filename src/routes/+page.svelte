@@ -172,6 +172,7 @@
 		| { kind: 'edit_agent'; agentId: string };
 	let modal = $state<ModalState>({ kind: 'none' });
 	let openMenu = $state<string | null>(null);
+	let channelDropdownOpen = $state(false);
 
 	// Issue #90: collapsible sidebar sections. Persist the
 	// collapsed state per section in localStorage so the user
@@ -1313,138 +1314,94 @@
 </script>
 
 <div class="root">
-	<aside>
-		<div class="brand">
-			<img
-				src="/finn-brand.webp"
-				alt=""
-				width="140"
-				height="140"
-				class="brand-img"
-			/>
-			<div class="brand-row">
-				<h1>finn</h1>
-				<span class="status" class:on={connected}>{connected ? '●' : '○'}</span>
+	<!-- TOP NAVIGATION (#147) -->
+	<nav class="top-nav" onclick={(e) => {
+		// Close channel dropdown on outside click
+		if (!(e.target as Element).closest('.channel-picker')) channelDropdownOpen = false;
+		// Close row menus on outside click
+		if (!(e.target as Element).closest('.row-wrapper')) openMenu = null;
+	}}>
+		<div class="nav-left">
+			<div class="brand-compact">
+				<span class="brand-logo">F</span>
+				<span class="brand-name">finn</span>
+				<span class="status" class:on={connected} title={connected ? 'connected' : 'disconnected'}>{connected ? '●' : '○'}</span>
 			</div>
-		</div>
 
-		<!-- Protocol viewer: styled as a sidebar nav row matching the
-			 channel/agent rows for visual consistency (#90 item 3). -->
-		<div class="section nav-section">
-			<a class="nav-row" href="/protocol">
-				<span class="nav-icon">☰</span>
-				<span>Protocol viewer</span>
-			</a>
-		</div>
-
-		<div class="section">
-			<div class="section-header">
+			<div class="channel-picker">
 				<button
-					class="section-title-btn"
-					type="button"
-					aria-expanded={!channelsCollapsed}
-					title={channelsCollapsed ? 'expand channels' : 'collapse channels'}
-					onclick={() => toggleSection('channels')}
+					class="channel-picker-btn"
+					onclick={(e) => { e.stopPropagation(); channelDropdownOpen = !channelDropdownOpen; }}
 				>
-					<span class="caret">{channelsCollapsed ? '▸' : '▾'}</span>
-					<span class="section-title">channels</span>
+					<span class="dot" class:disabled={!activeChannelId}></span>
+					<span class="channel-picker-name">{activeChannel ? '#' + activeChannel.name : 'select channel'}</span>
+					<span class="picker-caret">▾</span>
 				</button>
-				<button class="add-btn" title="add channel" onclick={() => (modal = { kind: 'create_channel' })}>+</button>
+				{#if channelDropdownOpen}
+					<div class="channel-dropdown">
+						<div class="dropdown-header">Channels</div>
+						{#each channels as c (c.id)}
+							<button
+								class="dropdown-item"
+								class:active={c.id === activeChannelId}
+								onclick={() => { pickChannel(c.id); channelDropdownOpen = false; }}
+							>
+								<span class="dot"></span>
+								<span>#{c.name}</span>
+							</button>
+						{/each}
+					</div>
+				{/if}
 			</div>
-			{#if !channelsCollapsed}
-			{#each channels as c (c.id)}
-				<div class="row-wrapper">
-					<button
-						class="channel-row"
-						class:active={c.id === activeChannelId}
-						onclick={() => pickChannel(c.id)}
-					>
-						<span class="hash">#</span>{c.name}
-					</button>
-					<button class="row-menu-btn" title="actions" onclick={() => toggleMenu(`ch:${c.id}`)}>⋯</button>
-					{#if openMenu === `ch:${c.id}`}
-						<div class="menu" role="menu">
-							<button onclick={() => openEditChannel(c.id)}>Edit</button>
-							<button onclick={() => archiveChannel(c.id)}>Archive</button>
-						</div>
-					{/if}
-				</div>
-			{/each}
+		</div>
+
+		<div class="nav-center">
+			<div class="search-wrap">
+				<input
+					type="text"
+					class="search"
+					placeholder="search this channel…"
+					bind:value={searchQuery}
+					oninput={onSearchInput}
+				/>
+			</div>
+			<button class="export-btn" onclick={exportChannel} title="export to markdown">Export</button>
+			<div class="filter-pills">
+				<button class="filter-pill" class:active={hideSystem} onclick={() => (hideSystem = !hideSystem)} title="hide system messages">system</button>
+				<button class="filter-pill" class:active={hideRejected} onclick={() => (hideRejected = !hideRejected)} title="hide rejected approvals">rejected</button>
+				<button class="filter-pill" class:active={showGroomed} onclick={() => (showGroomed = !showGroomed)} title="show groomed messages">groomed</button>
+			</div>
+		</div>
+
+		<div class="nav-right">
+			<a class="nav-icon-btn" href="/protocol" title="Protocol viewer">☰</a>
+			{#if activeChannel}
+				<a class="nav-icon-btn" href="/settings#{activeChannel.id}" title="Channel settings">⚙</a>
+			{:else}
+				<a class="nav-icon-btn" href="/settings" title="Settings">⚙</a>
 			{/if}
 		</div>
+	</nav>
 
-		{#if activeChannelId && activeMembers.length > 0}
-			<div class="section">
-				<div class="section-title">in this channel</div>
-				{#each activeMembers as m (m.id)}
-					<label class="filter-row">
-						<input
-							type="checkbox"
-							checked={!hiddenAgentIds.has(m.id)}
-							onchange={() => toggleSenderFilter(m.id)}
-						/>
-						<span class="dot" class:disabled={!m.enabled}></span>
-						<span class="filter-name">{m.name}</span>
-					</label>
-				{/each}
-			</div>
-
-			<div class="section">
-				<div class="section-title">filters</div>
-				<label class="filter-row">
-					<input type="checkbox" bind:checked={hideSystem} />
-					<span class="filter-name">hide system messages</span>
-				</label>
-				<label class="filter-row">
-					<input type="checkbox" bind:checked={hideRejected} />
-					<span class="filter-name">hide rejected approvals</span>
-				</label>
-				<label class="filter-row">
-					<input type="checkbox" bind:checked={showGroomed} />
-					<span class="filter-name">show groomed messages</span>
-				</label>
-			</div>
-		{/if}
-	</aside>
+	<!-- AGENT TOGGLE BAR (#147) -->
+	{#if activeChannelId && activeMembers.length > 0}
+		<div class="agent-bar">
+			<span class="agent-bar-label">Agents</span>
+			{#each activeMembers as m (m.id)}
+				<button
+					class="agent-chip"
+					class:enabled={!hiddenAgentIds.has(m.id)}
+					onclick={() => toggleSenderFilter(m.id)}
+					title="{hiddenAgentIds.has(m.id) ? 'Show' : 'Hide'} {m.name}"
+				>
+					<span>{m.name}</span>
+					<span class="agent-toggle" class:on={!hiddenAgentIds.has(m.id)}></span>
+				</button>
+			{/each}
+		</div>
+	{/if}
 
 	<section class="main">
-		<header>
-			{#if activeChannel}
-				<div class="channel-header-row">
-					<div>
-						<h1 class="channel-name">#{activeChannel.name}</h1>
-						{#if activeChannel.description}
-							<div class="channel-desc">{activeChannel.description}</div>
-						{/if}
-					</div>
-					<div class="channel-actions">
-						<input
-							type="text"
-							class="search"
-							placeholder="search this channel…"
-							bind:value={searchQuery}
-							oninput={onSearchInput}
-						/>
-						<button class="export-btn" onclick={exportChannel} title="export to markdown">
-							Export
-						</button>
-						<!-- Channel-scoped settings shortcut (ADR-0019). The
-							 /settings route renders the per-channel pane when
-							 the channel id is in the URL fragment. -->
-						<a
-							class="settings-link"
-							href={`/settings#${activeChannel.id}`}
-							title="channel settings"
-							aria-label="channel settings"
-						>
-							⚙
-						</a>
-					</div>
-				</div>
-			{:else}
-				<h1 class="channel-name muted">no channel selected</h1>
-			{/if}
-		</header>
 
 		{#if bootstrapError}
 			<div class="error">bootstrap failed: {bootstrapError}</div>
@@ -1582,47 +1539,241 @@
 		color: var(--finn-text-primary);
 	}
 	.root {
-		display: grid;
-		grid-template-columns: 280px 1fr;
+		display: flex;
+		flex-direction: column;
 		height: 100vh;
 		width: 100vw;
 		overflow: hidden;
 	}
-	aside {
+
+	/* ── Top navigation (#147) ───────────────────────────────── */
+	.top-nav {
+		flex: 0 0 auto;
+		height: 3.25rem;
 		background: var(--finn-bg-elevated);
-		border-right: 1px solid var(--finn-border);
-		padding: var(--finn-space-4);
-		overflow-y: auto;
+		border-bottom: 1px solid var(--finn-border);
 		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0 var(--finn-space-4);
+		z-index: 50;
 	}
-	.brand {
+	.nav-left {
 		display: flex;
-		flex-direction: column;
+		align-items: center;
+		gap: 0.75rem;
+		flex-shrink: 0;
+	}
+	.brand-compact {
+		display: flex;
 		align-items: center;
 		gap: 0.4rem;
-		margin-bottom: 0.75rem;
 	}
-	.brand-img {
-		/* Decorative atmosphere asset; the wordmark below carries
-		 * the actual brand name. Stays a fixed display size; the
-		 * source is exported at 2× so it stays crisp on retina. */
-		width: 140px;
-		height: 140px;
+	.brand-logo {
+		width: 1.6rem;
+		height: 1.6rem;
 		border-radius: var(--finn-radius-sm);
-		border: 1px solid var(--finn-border);
-		display: block;
-	}
-	.brand-row {
+		background: var(--finn-accent);
+		color: #fff;
+		font-weight: 700;
+		font-size: 0.85rem;
 		display: flex;
-		align-items: baseline;
+		align-items: center;
+		justify-content: center;
+	}
+	.brand-name {
+		font-weight: 600;
+		font-size: var(--finn-text-base);
+		color: var(--finn-text-primary);
+	}
+	/* Channel picker dropdown */
+	.channel-picker {
+		position: relative;
+	}
+	.channel-picker-btn {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.3rem 0.6rem;
+		background: var(--finn-bg-surface);
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-sm);
+		color: var(--finn-text-primary);
+		font-family: inherit;
+		font-size: var(--finn-text-sm);
+		font-weight: 500;
+		cursor: pointer;
+		transition: background var(--finn-transition-fast);
+	}
+	.channel-picker-btn:hover {
+		background: var(--finn-bg-hover);
+		border-color: var(--finn-border-hover);
+	}
+	.channel-picker-name { max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.picker-caret { color: var(--finn-text-muted); font-size: 0.7rem; }
+	.channel-dropdown {
+		position: absolute;
+		top: calc(100% + 4px);
+		left: 0;
+		min-width: 14rem;
+		background: var(--finn-bg-surface);
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-md);
+		box-shadow: var(--finn-shadow-md);
+		z-index: 100;
+		overflow: hidden;
+	}
+	.dropdown-header {
+		padding: 0.4rem 0.75rem;
+		font-size: var(--finn-text-xs);
+		color: var(--finn-text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		font-weight: 600;
+	}
+	.dropdown-item {
+		display: flex;
+		align-items: center;
 		gap: 0.5rem;
+		width: 100%;
+		text-align: left;
+		background: transparent;
+		border: 0;
+		color: var(--finn-text-secondary);
+		padding: 0.45rem 0.75rem;
+		font-family: inherit;
+		font-size: var(--finn-text-sm);
+		cursor: pointer;
+		transition: background var(--finn-transition-fast);
 	}
-	.brand h1 {
-		margin: 0;
-		font-size: 1.1rem;
+	.dropdown-item:hover { background: var(--finn-bg-hover); }
+	.dropdown-item.active { background: var(--finn-accent-soft); color: var(--finn-accent-hover); }
+	/* Nav center */
+	.nav-center {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex: 1;
+		min-width: 0;
+		justify-content: center;
 	}
+	.search-wrap { position: relative; }
+	.filter-pills {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+	}
+	.filter-pill {
+		padding: 0.2rem 0.55rem;
+		border-radius: var(--finn-radius-full);
+		border: 1px solid var(--finn-border);
+		background: transparent;
+		color: var(--finn-text-muted);
+		font-family: inherit;
+		font-size: var(--finn-text-xs);
+		cursor: pointer;
+		transition: all var(--finn-transition-fast);
+		white-space: nowrap;
+	}
+	.filter-pill:hover { background: var(--finn-bg-hover); color: var(--finn-text-secondary); }
+	.filter-pill.active {
+		background: var(--finn-accent-soft);
+		color: var(--finn-accent-hover);
+		border-color: var(--finn-accent-glow);
+	}
+	/* Nav right */
+	.nav-right {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		flex-shrink: 0;
+	}
+	.nav-icon-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 2rem;
+		height: 2rem;
+		border-radius: var(--finn-radius-sm);
+		color: var(--finn-text-muted);
+		text-decoration: none;
+		font-size: 1rem;
+		transition: background var(--finn-transition-fast), color var(--finn-transition-fast);
+	}
+	.nav-icon-btn:hover { background: var(--finn-bg-hover); color: var(--finn-text-primary); }
+
+	/* ── Agent toggle bar (#147) ──────────────────────────── */
+	.agent-bar {
+		flex: 0 0 auto;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.4rem var(--finn-space-4);
+		background: rgba(255,255,255,0.02);
+		border-bottom: 1px solid var(--finn-border);
+		overflow-x: auto;
+		scrollbar-width: none;
+	}
+	.agent-bar::-webkit-scrollbar { display: none; }
+	.agent-bar-label {
+		font-size: var(--finn-text-xs);
+		color: var(--finn-text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		font-weight: 600;
+		margin-right: 0.25rem;
+		flex-shrink: 0;
+	}
+	.agent-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.2rem 0.55rem 0.2rem 0.5rem;
+		border-radius: var(--finn-radius-full);
+		border: 1px solid var(--finn-border);
+		background: var(--finn-bg-hover);
+		color: var(--finn-text-disabled);
+		font-family: inherit;
+		font-size: var(--finn-text-xs);
+		font-weight: 500;
+		cursor: pointer;
+		white-space: nowrap;
+		flex-shrink: 0;
+		transition: all var(--finn-transition-fast);
+	}
+	.agent-chip.enabled {
+		background: var(--finn-accent-soft);
+		color: var(--finn-accent-hover);
+		border-color: var(--finn-accent-glow);
+	}
+	/* Toggle switch inside chip */
+	.agent-toggle {
+		position: relative;
+		width: 1.6rem;
+		height: 0.9rem;
+		background: var(--finn-text-disabled);
+		border-radius: var(--finn-radius-full);
+		flex-shrink: 0;
+		transition: background var(--finn-transition-fast);
+	}
+	.agent-toggle::after {
+		content: '';
+		position: absolute;
+		top: 2px;
+		left: 2px;
+		width: 0.6rem;
+		height: 0.6rem;
+		border-radius: 50%;
+		background: #fff;
+		transition: transform var(--finn-transition-fast);
+	}
+	.agent-toggle.on {
+		background: var(--finn-accent);
+	}
+	.agent-toggle.on::after {
+		transform: translateX(0.7rem);
+	}
+
 	.status {
 		font-size: var(--finn-text-sm);
 		color: var(--finn-text-disabled);
@@ -1630,288 +1781,7 @@
 	.status.on {
 		color: var(--finn-success);
 	}
-	/* Protocol-viewer nav row: matches the .channel-row visual
-	 * weight so the sidebar reads as one consistent list of
-	 * navigable items (#90 item 3). */
-	.nav-section {
-		margin-top: 0;
-		margin-bottom: 0.25rem;
-	}
-	.nav-row {
-		display: flex;
-		align-items: center;
-		gap: 0.4rem;
-		color: var(--finn-text-secondary);
-		text-decoration: none;
-		padding: 0.4rem 0.5rem;
-		border-radius: var(--finn-radius-sm);
-		font-size: var(--finn-text-base);
-		transition: background var(--finn-transition-fast);
-	}
-	.nav-row:hover {
-		background: var(--finn-bg-hover);
-		color: var(--finn-text-primary);
-	}
-	.nav-icon {
-		color: var(--finn-text-muted);
-	}
-
-	.section {
-		display: flex;
-		flex-direction: column;
-		gap: 0.15rem;
-		margin-top: 0.5rem;
-	}
-	.section-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		margin-bottom: 0.15rem;
-	}
-	.section-title {
-		color: var(--finn-text-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		font-size: var(--finn-text-xs);
-		font-weight: 600;
-	}
-	/* Section title rendered as a button so the header is the
-	 * collapse-toggle affordance (#90 item 2). Caret shows the
-	 * current state. */
-	.section-title-btn {
-		display: flex;
-		align-items: center;
-		gap: 0.3rem;
-		background: transparent;
-		border: 0;
-		padding: 0.1rem 0.15rem;
-		border-radius: 3px;
-		cursor: pointer;
-		font: inherit;
-		color: inherit;
-	}
-	.section-title-btn:hover {
-		background: var(--finn-bg-hover);
-	}
-	.caret {
-		color: var(--finn-text-disabled);
-		font-size: 0.65rem;
-		width: 0.7rem;
-		display: inline-block;
-	}
-	.add-btn {
-		background: var(--finn-bg-surface);
-		border: 1px solid var(--finn-border);
-		color: var(--finn-text-secondary);
-		width: 1.4rem;
-		height: 1.4rem;
-		line-height: 1;
-		font-size: 1rem;
-		border-radius: var(--finn-radius-sm);
-		cursor: pointer;
-		padding: 0;
-		transition: background var(--finn-transition-fast), border-color var(--finn-transition-fast);
-	}
-
-	.add-btn:hover {
-		background: var(--finn-bg-hover);
-		border-color: var(--finn-border-hover);
-		color: var(--finn-text-primary);
-	}
-	.row-wrapper {
-		position: relative;
-		display: flex;
-		align-items: center;
-	}
-	.row-wrapper:hover .row-menu-btn {
-		opacity: 1;
-	}
-	.row-menu-btn {
-		opacity: 0;
-		background: transparent;
-		border: 0;
-		color: var(--finn-text-muted);
-		font-size: 1rem;
-		padding: 0 0.4rem;
-		cursor: pointer;
-	}
-	.row-menu-btn:hover {
-		color: var(--finn-text-primary);
-	}
-	.menu {
-		position: absolute;
-		right: 0;
-		top: 1.8rem;
-		background: var(--finn-bg-surface);
-		border: 1px solid var(--finn-border);
-		border-radius: var(--finn-radius-md);
-		box-shadow: var(--finn-shadow-md);
-		display: flex;
-		flex-direction: column;
-		min-width: 110px;
-		z-index: 10;
-	}
-	.menu button {
-		text-align: left;
-		background: transparent;
-		border: 0;
-		color: var(--finn-text-secondary);
-		padding: 0.4rem 0.7rem;
-		font-family: inherit;
-		font-size: var(--finn-text-sm);
-		cursor: pointer;
-	}
-	.menu button:hover {
-		background: var(--finn-bg-hover);
-	}
-	.channel-row {
-		flex: 1;
-		text-align: left;
-		background: transparent;
-		color: var(--finn-text-secondary);
-		border: 0;
-		padding: 0.5rem 0.75rem;
-		font-family: inherit;
-		font-size: var(--finn-text-base);
-		border-radius: var(--finn-radius-sm);
-		cursor: pointer;
-		font-weight: 500;
-		transition: background var(--finn-transition-fast), color var(--finn-transition-fast);
-	}
-	.channel-row:hover {
-		background: var(--finn-bg-hover);
-	}
-	.channel-row.active {
-		background: var(--finn-accent-soft);
-		color: var(--finn-accent-hover);
-	}
-	.hash {
-		color: var(--finn-text-disabled);
-		margin-right: 0.25rem;
-	}
-
-	.dot {
-		width: 0.5rem;
-		height: 0.5rem;
-		border-radius: 50%;
-		background: var(--finn-success);
-		display: inline-block;
-		flex-shrink: 0;
-	}
-	.dot.disabled {
-		background: var(--finn-text-disabled);
-	}
-
-
-	.filter-row {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		padding: 0.2rem 0.5rem;
-		font-size: var(--finn-text-sm);
-		color: var(--finn-text-secondary);
-		cursor: pointer;
-	}
-	.filter-row input[type='checkbox'] {
-		accent-color: var(--finn-accent);
-	}
-	.filter-name {
-		flex: 1;
-	}
-
-	.main {
-		display: flex;
-		flex-direction: column;
-		min-width: 0;
-		height: 100vh;
-		overflow: hidden;
-	}
-	.main header {
-		flex: 0 0 auto;
-		padding: 0.75rem var(--finn-space-4);
-		border-bottom: 1px solid var(--finn-border);
-		background: var(--finn-bg-elevated);
-	}
-	.channel-header-row {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 1rem;
-	}
-	.channel-name {
-		/* h1 sized to match settings page's <h1> visual weight
-		 * (#90 item 4): symmetric header treatment across the two
-		 * surfaces. */
-		margin: 0;
-		font-size: 1.1rem;
-		font-weight: 600;
-	}
-	.channel-name.muted {
-		color: var(--finn-text-muted);
-		font-weight: 400;
-	}
-	.channel-desc {
-		color: var(--finn-text-muted);
-		font-size: var(--finn-text-sm);
-		margin-top: 0.15rem;
-	}
-	.channel-actions {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
-	.search {
-		background: var(--finn-bg-input);
-		border: 1px solid var(--finn-border);
-		color: var(--finn-text-primary);
-		padding: 0.35rem 0.55rem;
-		font-family: inherit;
-		font-size: var(--finn-text-sm);
-		border-radius: var(--finn-radius-sm);
-		width: 14rem;
-		transition: border-color var(--finn-transition-fast);
-	}
-	.search:focus {
-		border-color: var(--finn-accent);
-	}
-	.export-btn {
-		background: var(--finn-bg-surface);
-		color: var(--finn-text-secondary);
-		border: 1px solid var(--finn-border);
-		padding: 0.35rem 0.7rem;
-		font-family: inherit;
-		font-size: var(--finn-text-sm);
-		border-radius: var(--finn-radius-sm);
-		cursor: pointer;
-		transition: background var(--finn-transition-fast), border-color var(--finn-transition-fast);
-	}
-	.export-btn:hover {
-		background: var(--finn-bg-hover);
-		border-color: var(--finn-border-hover);
-	}
-	.settings-link {
-		/* Channel-scoped settings shortcut (ADR-0019). Sits next to
-		   Export, opens /settings with the channel pre-selected via
-		   URL fragment. Visual matches export-btn so the action bar
-		   stays cohesive. */
-		background: var(--finn-bg-surface);
-		color: var(--finn-text-secondary);
-		border: 1px solid var(--finn-border);
-		padding: 0.35rem 0.6rem;
-		font-family: inherit;
-		font-size: var(--finn-text-base);
-		border-radius: var(--finn-radius-sm);
-		text-decoration: none;
-		display: inline-flex;
-		align-items: center;
-		line-height: 1;
-		transition: background var(--finn-transition-fast), border-color var(--finn-transition-fast);
-	}
-	.settings-link:hover {
-		background: var(--finn-bg-hover);
-		border-color: var(--finn-border-hover);
-	}
-	.error {
+	.error {	.error {
 		background: var(--finn-error-bg);
 		color: var(--finn-error);
 		padding: 0.5rem 1rem;
