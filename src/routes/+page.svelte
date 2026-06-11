@@ -1781,6 +1781,15 @@
 	.status.on {
 		color: var(--finn-success);
 	}
+
+	/* ── Main content area ───────────────────────────────────── */
+	.main {
+		display: flex;
+		flex-direction: column;
+		flex: 1 1 auto;
+		min-height: 0;
+		overflow: hidden;
+	}
 	.error {
 		background: var(--finn-error-bg);
 		color: var(--finn-error);
