@@ -15,6 +15,8 @@
 	import { onMount, onDestroy } from 'svelte';
 	import AgentForm from '$lib/ui/AgentForm.svelte';
 	import type { AgentFormPayload } from '$lib/ui/AgentForm.svelte';
+	import ChannelForm from '$lib/ui/ChannelForm.svelte';
+	import type { ChannelFormPayload } from '$lib/ui/ChannelForm.svelte';
 
 	type Theme = 'system' | 'light' | 'dark';
 
@@ -64,7 +66,12 @@
 	let editingAgent = $state<AgentInfo | null>(null);
 	let loadAgentInput: HTMLInputElement | null = $state(null);
 	// channel membership per agent: agentId → array of {id, name}
-	let agentChannels = $state<Record<string, { id: string; name: string }[]>>({}); 
+	let agentChannels = $state<Record<string, { id: string; name: string }[]>>({});
+
+	// ── Channel management state ───────────────────────────────────
+	let channelFormMode = $state<'none' | 'create' | 'edit'>('none');
+	let editingChannel = $state<(typeof channels)[0] | null>(null);
+	let editingChannelMembers = $state<string[]>([]);
 	let channelDetail = $state<ChannelSettings | null>(null);
 	let loadError = $state<string | null>(null);
 	let saveError = $state<string | null>(null);
@@ -290,6 +297,66 @@
 		if (res.ok) await loadAgentChannels(agentId);
 	}
 
+	// ── Channel CRUD ─────────────────────────────────────────────
+	async function openEditChannel(ch: (typeof channels)[0]) {
+		const res = await fetch(`/api/channels/${ch.id}/members`);
+		const data = res.ok ? await res.json() : { members: [] };
+		editingChannelMembers = (data.members ?? []).map((m: { id: string }) => m.id);
+		editingChannel = ch;
+		channelFormMode = 'edit';
+	}
+
+	async function submitChannelForm(payload: ChannelFormPayload) {
+		if (payload.mode === 'create') {
+			const res = await fetch('/api/channels', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					name: payload.name,
+					description: payload.description,
+					agent_ids: payload.member_agent_ids ?? []
+				})
+			});
+			if (!res.ok) throw new Error((await res.json()).message ?? `HTTP ${res.status}`);
+		} else {
+			if (!editingChannel) return;
+			const res = await fetch(`/api/channels/${editingChannel.id}`, {
+				method: 'PATCH',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ name: payload.name, description: payload.description })
+			});
+			if (!res.ok) throw new Error((await res.json()).message ?? `HTTP ${res.status}`);
+			// Handle member additions/removals
+			const adds = payload.add_member_ids ?? [];
+			const removes = payload.remove_member_ids ?? [];
+			await Promise.all([
+				...adds.map((id) =>
+					fetch(`/api/channels/${editingChannel!.id}/members`, {
+						method: 'POST',
+						headers: { 'content-type': 'application/json' },
+						body: JSON.stringify({ agent_id: id })
+					})
+				),
+				...removes.map((id) =>
+					fetch(`/api/channels/${editingChannel!.id}/members/${id}`, { method: 'DELETE' })
+				)
+			]);
+		}
+		channelFormMode = 'none';
+		editingChannel = null;
+		editingChannelMembers = [];
+		await loadChannels();
+	}
+
+	async function archiveChannel(ch: (typeof channels)[0]) {
+		if (!confirm(`Archive "#${ch.name}"? Past messages remain accessible.`)) return;
+		const res = await fetch(`/api/channels/${ch.id}`, { method: 'DELETE' });
+		if (res.ok) {
+			if (selected === ch.id) selected = 'channels';
+			await loadChannels();
+		}
+	}
+
 	async function loadChannelDetail(channelId: string) {
 		channelDetail = null;
 		editChannel = null;
@@ -500,8 +567,9 @@
 				return;
 			}
 			if (msg.type !== 'state_changed') return;
-			if (msg.entity === 'agent') {
-				await loadAgents();
+			if (msg.entity === 'agent') { await loadAgents(); return; }
+			if (msg.entity === 'channel' || msg.entity === 'channel_member') {
+				await loadChannels();
 				return;
 			}
 			if (msg.entity !== 'settings') return;
@@ -517,7 +585,7 @@
 	}
 
 	$effect(() => {
-		if (selected === 'global' || selected === 'agents') {
+		if (selected === 'global' || selected === 'agents' || selected === 'channels') {
 			channelDetail = null;
 			editChannel = null;
 		} else if (selected) {
@@ -586,6 +654,13 @@
 				Manage Agents
 			</button>
 			<div class="rail-divider">Channels</div>
+			<button
+				type="button"
+				class:active={selected === 'channels'}
+				onclick={() => (selected = 'channels')}
+			>
+				Manage Channels
+			</button>
 			{#each channels as ch (ch.id)}
 				<button
 					type="button"
@@ -881,8 +956,54 @@
 				</div>
 			{/if}
 		{/if}
+
+		{#if selected === 'channels'}
+			<h1>Channels</h1>
+			<p class="note">Create, edit, and archive channels. Switch channels from the main view.</p>
+
+			<div class="agent-toolbar">
+				<button type="button" class="primary" onclick={() => { channelFormMode = 'create'; editingChannel = null; }}>
+					+ New Channel
+				</button>
+			</div>
+
+			{#if channels.length === 0}
+				<p class="note empty">No channels yet.</p>
+			{:else}
+				<div class="agent-list">
+					{#each channels as ch (ch.id)}
+						<div class="agent-card">
+							<div class="agent-card-header">
+								<div class="agent-info">
+									<span class="agent-name">#{ ch.name}</span>
+									{#if ch.description}
+										<span class="agent-type">{ch.description}</span>
+									{/if}
+								</div>
+								<div class="agent-row-actions">
+									<button type="button" onclick={() => openEditChannel(ch)}>Edit</button>
+									<button type="button" onclick={() => selected = ch.id} title="Channel settings">⚙</button>
+									<button type="button" class="danger" onclick={() => archiveChannel(ch)}>Archive</button>
+								</div>
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
+		{/if}
 	</main>
 </div>
+
+{#if channelFormMode !== 'none'}
+	<ChannelForm
+		mode={channelFormMode === 'create' ? 'create' : 'edit'}
+		channel={editingChannel ?? undefined}
+		allAgents={agentsList}
+		currentMemberIds={editingChannelMembers}
+		onSubmit={submitChannelForm}
+		onCancel={() => { channelFormMode = 'none'; editingChannel = null; editingChannelMembers = []; }}
+	/>
+{/if}
 
 {#if agentFormMode !== 'none'}
 	<AgentForm
