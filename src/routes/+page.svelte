@@ -1781,7 +1781,7 @@
 	.status.on {
 		color: var(--finn-success);
 	}
-	.error {
+	.error {	.error {
 		background: var(--finn-error-bg);
 		color: var(--finn-error);
 		padding: 0.5rem 1rem;
