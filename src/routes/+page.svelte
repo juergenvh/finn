@@ -1882,6 +1882,7 @@
 	.composer {
 		flex: 1;
 		position: relative;
+		min-width: 0;
 	}
 	footer button {
 		background: var(--finn-accent);
