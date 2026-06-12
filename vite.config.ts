@@ -13,9 +13,6 @@ dotenv.config({ path: SECRETS_PATH, quiet: true });
 
 export default defineConfig({
 	plugins: [sveltekit(), finnWsDevPlugin()],
-	// Disable Carta/Shiki SSR highlighter to keep the server bundle lean.
-	// Client-side highlighting still works via dynamic import.
-	define: { __ENABLE_CARTA_SSR_HIGHLIGHTER__: false },
 	build: {
 		chunkSizeWarningLimit: 700
 	}
