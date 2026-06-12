@@ -81,21 +81,20 @@
 	let savingGlobal = $state(false);
 	let savingChannel = $state(false);
 
-	// Editable buffers. We do NOT bind directly to `global` / `channelDetail`
-	// because the WS broadcast reload would clobber unsaved edits. The
-	// buffers are seeded on load and on "discard"; Save flushes them.
+	// Editable buffers for Global pane.
 	let editGlobal = $state<Global | null>(null);
 	let editChannel = $state<{
 		kbBudgetOverride: number | null;
 		autoApprove: boolean;
 		roundtripCapOverride: number | null;
 	} | null>(null);
-	// Channel `kbBudgetOverride` UX: textbox bound to a string so the user
-	// can type and clear freely. Empty string = "inherit global" (null on
-	// the wire). Numeric out-of-range surfaces as validation on Save.
 	let editChannelBudgetText = $state<string>('');
-	// Same UX for the roundtrip-cap override.
 	let editChannelRoundtripText = $state<string>('');
+
+	// Per-channel inline settings (Channels pane)
+	type ChEdit = { budgetText: string; autoApprove: boolean; roundtripText: string; saving: boolean; };
+	let channelDetailsMap = $state<Record<string, ChannelSettings>>({});
+	let channelEditsMap = $state<Record<string, ChEdit>>({});
 
 	let ws: WebSocket | null = null;
 
@@ -540,6 +539,48 @@
 		}
 	}
 
+	// Inline per-channel settings helpers (Channels pane)
+	async function loadAllChannelDetails() {
+		await Promise.all(channels.map(async (ch) => {
+			const res = await fetch(`/api/settings?channelId=${encodeURIComponent(ch.id)}`);
+			if (!res.ok) return;
+			const data = await res.json();
+			const detail = data.channel as ChannelSettings;
+			channelDetailsMap = { ...channelDetailsMap, [ch.id]: detail };
+			channelEditsMap = { ...channelEditsMap, [ch.id]: {
+				budgetText: detail.kbBudgetOverride?.toString() ?? '',
+				autoApprove: detail.autoApprove,
+				roundtripText: detail.roundtripCapOverride?.toString() ?? '',
+				saving: false
+			}};
+		}));
+	}
+
+	function patchChannelEdit(chId: string, patch: Partial<ChEdit>) {
+		channelEditsMap = { ...channelEditsMap, [chId]: { ...channelEditsMap[chId], ...patch } };
+	}
+
+	async function saveChannelInline(chId: string) {
+		const ed = channelEditsMap[chId];
+		if (!ed || !global) return;
+		patchChannelEdit(chId, { saving: true });
+		const body: Record<string, unknown> = { autoApprove: ed.autoApprove };
+		body.kbBudgetOverride = ed.budgetText.trim() === '' ? null : parseInt(ed.budgetText, 10);
+		body.roundtripCapOverride = ed.roundtripText.trim() === '' ? null : parseInt(ed.roundtripText, 10);
+		const res = await fetch(`/api/settings/channel/${encodeURIComponent(chId)}`, {
+			method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+		});
+		patchChannelEdit(chId, { saving: false });
+		if (!res.ok) saveError = `Save failed: ${res.status}`;
+	}
+
+	async function resetChannelInline(chId: string) {
+		if (!confirm('Reset all per-channel overrides?')) return;
+		const res = await fetch(`/api/settings/channel/${encodeURIComponent(chId)}`, { method: 'DELETE' });
+		if (!res.ok) { saveError = `Reset failed: ${res.status}`; return; }
+		await loadAllChannelDetails();
+	}
+
 	async function resetChannelToGlobal() {
 		if (!confirm('Reset all per-channel overrides for this channel?')) return;
 		const res = await fetch(`/api/settings/channel/${encodeURIComponent(selected)}`, {
@@ -609,6 +650,7 @@
 			if (msg.entity === 'agent') { await loadAgents(); return; }
 			if (msg.entity === 'channel' || msg.entity === 'channel_member') {
 				await loadChannels();
+				await loadAllChannelDetails();
 				return;
 			}
 			if (msg.entity !== 'settings') return;
@@ -623,37 +665,31 @@
 		};
 	}
 
+	// selected is now always 'global' | 'agents' | 'channels'
 	$effect(() => {
-		if (selected === 'global' || selected === 'agents' || selected === 'channels') {
-			channelDetail = null;
-			editChannel = null;
-		} else if (selected) {
-			loadChannelDetail(selected);
-		}
+		channelDetail = null;
+		editChannel = null;
 	});
 
 	onMount(async () => {
 		await Promise.all([loadGlobal(), loadChannels(), loadAgents()]);
+		await loadAllChannelDetails();
 		if (global) applyThemeToHtml(global.theme);
 		listenSystemTheme();
-		// Deep-link via /settings#<channelId>. The channel-header gear
-		// in +page.svelte produces such a link. Hash takes effect after
-		// the channel list has loaded so the selection is recognised.
 		const hash = window.location.hash.replace(/^#/, '');
-		if (hash && channels.some((c) => c.id === hash)) {
-			selected = hash;
-		}
+		if (hash === 'agents') selected = 'agents';
+		else if (hash === 'channels') selected = 'channels';
+		// #channelId links (from nav gear) now route to Channels pane
+		else if (hash && channels.some((c) => c.id === hash)) selected = 'channels';
 		window.addEventListener('hashchange', onHashChange);
 		connectWs();
 	});
 
 	function onHashChange() {
 		const hash = window.location.hash.replace(/^#/, '');
-		if (hash === '' || hash === 'global') {
-			selected = 'global';
-		} else if (channels.some((c) => c.id === hash)) {
-			selected = hash;
-		}
+		if (hash === 'agents') selected = 'agents';
+		else if (hash === 'channels') selected = 'channels';
+		else selected = 'global';
 	}
 
 	onDestroy(() => {
@@ -700,17 +736,6 @@
 			>
 				Channels
 			</button>
-			{#each channels as ch (ch.id)}
-				<button
-					type="button"
-					class:active={selected === ch.id}
-					onclick={() => (selected = ch.id)}
-				>
-					{ch.name}
-				</button>
-			{:else}
-				<div class="rail-empty">No channels yet.</div>
-			{/each}
 		</nav>
 		<p class="rail-foot">
 			<a href="/">← back to channels</a>
@@ -826,96 +851,13 @@
 							Discard
 						</button>
 					</div>
-				</form>
+					</form>
 				</div>
 			{:else if !loadError}
 				<p>Loading…</p>
 			{/if}
-		{:else}
-			<h1>Channel: {channelName(selected)}</h1>
-			<p class="note">
-				Per-channel overrides for <strong>{channelName(selected)}</strong>. Empty values inherit
-				the global default.
-			</p>
-			{#if editChannel && channelDetail && global}
-				<form
-					onsubmit={(e) => {
-						e.preventDefault();
-						saveChannel();
-					}}
-				>
-					<div class="field">
-						<label for="kb-budget-ov">KB budget override</label>
-						<input
-							id="kb-budget-ov"
-							type="number"
-							min="1"
-							max="100000"
-							step="1"
-							placeholder={`inherit (${global.kbBudgetDefault})`}
-							bind:value={editChannelBudgetText}
-						/>
-						<span class="unit">KB</span>
-						<span class="hint">Empty = inherit global ({global.kbBudgetDefault} KB).</span>
-					</div>
-
-					<div class="field">
-						<label for="auto-approve">Auto-approve agent-to-agent mentions</label>
-						<input
-							id="auto-approve"
-							type="checkbox"
-							bind:checked={editChannel.autoApprove}
-						/>
-						<span class="hint">
-							When enabled, mentions from one agent to another in this channel
-							skip the approval queue. UI for the audit log lands with the
-							ADR-0015 PR stack.
-						</span>
-					</div>
-
-					<div class="field">
-						<label for="roundtrip-cap-ov">Roundtrip cap override</label>
-						<input
-							id="roundtrip-cap-ov"
-							type="number"
-							min="1"
-							max="100"
-							step="1"
-							placeholder={`inherit (${global.roundtripCapDefault})`}
-							bind:value={editChannelRoundtripText}
-						/>
-						<span class="unit">hops</span>
-						<span class="hint">
-							Empty = inherit global ({global.roundtripCapDefault}).
-						</span>
-					</div>
-
-					<div class="actions">
-						<button type="submit" disabled={!dirtyChannel || savingChannel}>
-							{savingChannel ? 'Saving…' : 'Save'}
-						</button>
-						<button
-							type="button"
-							class="secondary"
-							onclick={discardChannel}
-							disabled={!dirtyChannel || savingChannel}
-						>
-							Discard
-						</button>
-						<button
-							type="button"
-							class="danger"
-							onclick={resetChannelToGlobal}
-							disabled={savingChannel}
-						>
-							Reset to global
-						</button>
-					</div>
-				</form>
-			{:else if !loadError}
-				<p>Loading…</p>
-			{/if}
 		{/if}
+
 
 		{#if selected === 'agents'}
 			<h1>Agents</h1>
@@ -1010,13 +952,10 @@
 								<div class="agent-info">
 									<span class="dot"></span>
 									<span class="agent-name">#{ch.name}</span>
-									{#if ch.description}
-										<span class="agent-type">{ch.description}</span>
-									{/if}
+									{#if ch.description}<span class="agent-type">{ch.description}</span>{/if}
 								</div>
 								<div class="agent-row-actions">
 									<button type="button" onclick={() => openEditChannel(ch)}>Edit</button>
-									<button type="button" onclick={() => (selected = ch.id)} title="Advanced settings">⚙</button>
 									<button type="button" class="danger" onclick={() => archiveChannel(ch)}>Archive</button>
 								</div>
 							</div>
@@ -1028,6 +967,49 @@
 									<span class="channels-label" style="font-style:italic">none</span>
 								{/each}
 							</div>
+							{#if channelEditsMap[ch.id] && channelDetailsMap[ch.id] && global}
+								{@const ed = channelEditsMap[ch.id]}
+								{@const det = channelDetailsMap[ch.id]}
+								<form class="ch-settings-form" onsubmit={(e) => { e.preventDefault(); saveChannelInline(ch.id); }}>
+									<div class="field">
+										<label>KB budget override</label>
+										<input type="number" min="1" max="100000" step="1"
+											placeholder="inherit ({global.kbBudgetDefault})"
+											value={ed.budgetText}
+											oninput={(e) => patchChannelEdit(ch.id, { budgetText: (e.target as HTMLInputElement).value })}
+										/>
+										<span class="unit">KB</span>
+										<span class="hint">Empty = inherit global ({global.kbBudgetDefault} KB)</span>
+									</div>
+									<div class="field">
+										<label>Auto-approve agent mentions</label>
+										<input type="checkbox" checked={ed.autoApprove}
+											onchange={(e) => patchChannelEdit(ch.id, { autoApprove: (e.target as HTMLInputElement).checked })}
+										/>
+										<span class="hint">Skip approval queue for agent→agent mentions</span>
+									</div>
+									<div class="field">
+										<label>Roundtrip cap override</label>
+										<input type="number" min="1" max="100" step="1"
+											placeholder="inherit ({global.roundtripCapDefault})"
+											value={ed.roundtripText}
+											oninput={(e) => patchChannelEdit(ch.id, { roundtripText: (e.target as HTMLInputElement).value })}
+										/>
+										<span class="unit">hops</span>
+										<span class="hint">Empty = inherit global ({global.roundtripCapDefault})</span>
+									</div>
+									<div class="actions">
+										<button type="submit" disabled={ed.saving}>{ed.saving ? 'Saving…' : 'Save'}</button>
+										<button type="button" class="secondary"
+											onclick={() => patchChannelEdit(ch.id, {
+												budgetText: det.kbBudgetOverride?.toString() ?? '',
+												autoApprove: det.autoApprove,
+												roundtripText: det.roundtripCapOverride?.toString() ?? ''
+											})}>Discard</button>
+										<button type="button" class="danger" onclick={() => resetChannelInline(ch.id)}>Reset to global</button>
+									</div>
+								</form>
+							{/if}
 						</div>
 					{/each}
 				</div>
@@ -1122,12 +1104,7 @@
 		color: var(--finn-text-muted);
 	}
 
-	.rail-empty {
-		padding: 6px 10px;
-		color: var(--finn-text-muted);
-		font-style: italic;
-		font-size: var(--finn-text-sm);
-	}
+
 
 	.rail-foot {
 		margin-top: 24px;
@@ -1408,6 +1385,14 @@
 		font-family: inherit;
 		font-size: var(--finn-text-xs);
 		cursor: pointer;
+	}
+	/* Inline channel settings form */
+	.ch-settings-form {
+		padding: 0.75rem 0.85rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		border-top: 1px solid var(--finn-border);
 	}
 	/* Global settings card wrapper — matches agent-card style */
 	.settings-card {
