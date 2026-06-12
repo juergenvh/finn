@@ -1879,11 +1879,20 @@
 		border-top: 1px solid var(--finn-border);
 		background: var(--finn-bg-elevated);
 	}
+	/* The .composer div IS the visual input box — one border, no nesting */
 	.composer {
 		flex: 1;
 		position: relative;
+		background: var(--finn-bg-input);
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-md);
+		overflow: hidden;
+		transition: border-color var(--finn-transition-fast);
 	}
-/* textarea replaced by CartaComposer */
+	.composer:focus-within {
+		border-color: var(--finn-accent);
+		box-shadow: 0 0 0 2px var(--finn-accent-glow);
+	}
 	footer button {
 		background: var(--finn-accent);
 		color: #fff;
