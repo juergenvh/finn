@@ -13,10 +13,10 @@ dotenv.config({ path: SECRETS_PATH, quiet: true });
 
 export default defineConfig({
 	plugins: [sveltekit(), finnWsDevPlugin()],
+	// Disable Carta/Shiki SSR highlighter to keep the server bundle lean.
+	// Client-side highlighting still works via dynamic import.
+	define: { __ENABLE_CARTA_SSR_HIGHLIGHTER__: false },
 	build: {
-		// Mermaid is lazy-loaded (dynamic import in mermaid.ts) but Vite
-		// bundles it into a shared chunk that tips the 500 kB default threshold.
-		// The chunk is only 137 kB gzipped and loads lazily — no real concern.
 		chunkSizeWarningLimit: 700
 	}
 });

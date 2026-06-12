@@ -7,6 +7,7 @@
 	import AgentForm from '$lib/ui/AgentForm.svelte';
 	import type { AgentFormPayload } from '$lib/ui/AgentForm.svelte';
 	import MentionPopup from '$lib/ui/MentionPopup.svelte';
+	import CartaComposer from '$lib/ui/CartaComposer.svelte';
 	import type {
 		ChannelInfo,
 		AgentInfo,
@@ -1453,20 +1454,15 @@
 					highlightedIndex={mentionIndex}
 					onSelect={selectMention}
 				/>
-				<textarea
-					bind:this={composer}
+				<CartaComposer
 					value={draft.value}
-					oninput={(e) => {
-						draft.value = (e.currentTarget as HTMLTextAreaElement).value;
-						onComposerInput();
-					}}
-					onkeydown={onComposerKey}
-					placeholder="message — Enter to send, @-mentions become approval defaults"
-					rows="2"
+					onvalue={(v) => { draft.value = v; onComposerInput(); }}
+					onsubmit={send}
 					disabled={!connected || !activeChannelId}
-				></textarea>
+					placeholder="message — Shift+Enter for new line, @mentions"
+				/>
 			</div>
-			<button onclick={send} disabled={!connected || !draft.value.trim() || !activeChannelId}>send</button>
+			<button onclick={send} disabled={!connected || !draft.value.trim() || !activeChannelId}>Send</button>
 		</footer>
 	</section>
 </div>
@@ -1887,26 +1883,7 @@
 		flex: 1;
 		position: relative;
 	}
-	textarea {
-		width: 100%;
-		box-sizing: border-box;
-		background: var(--finn-bg-input);
-		border: 1px solid var(--finn-border);
-		color: var(--finn-text-primary);
-		padding: 0.5rem;
-		font-family: inherit;
-		font-size: var(--finn-text-base);
-		border-radius: var(--finn-radius-md);
-		resize: none;
-		min-height: 2.5rem;
-		overflow-y: hidden;
-		transition: border-color var(--finn-transition-fast);
-	}
-	textarea:focus {
-		outline: none;
-		border-color: var(--finn-accent);
-		box-shadow: 0 0 0 3px var(--finn-accent-glow);
-	}
+/* textarea replaced by CartaComposer */
 	footer button {
 		background: var(--finn-accent);
 		color: #fff;
