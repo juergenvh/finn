@@ -1089,13 +1089,15 @@
 	.settings-page {
 		display: grid;
 		grid-template-columns: 240px 1fr;
-		min-height: 100vh;
+		height: 100vh;
+		overflow: hidden;
 	}
 
 	.rail {
 		border-right: 1px solid var(--finn-border);
 		padding: var(--finn-space-4);
 		background: var(--finn-bg-elevated);
+		overflow-y: auto;
 	}
 
 	.rail h2 {
