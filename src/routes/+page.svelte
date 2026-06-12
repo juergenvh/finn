@@ -7,7 +7,7 @@
 	import AgentForm from '$lib/ui/AgentForm.svelte';
 	import type { AgentFormPayload } from '$lib/ui/AgentForm.svelte';
 	import MentionPopup from '$lib/ui/MentionPopup.svelte';
-	import CartaComposer from '$lib/ui/CartaComposer.svelte';
+	import MarkdownComposer from '$lib/ui/MarkdownComposer.svelte';
 	import type {
 		ChannelInfo,
 		AgentInfo,
@@ -125,7 +125,6 @@
 			}
 		}
 	};
-	let composer: HTMLTextAreaElement | null = $state(null);
 
 	/* ---------- mention autocomplete ---------- */
 
@@ -859,7 +858,6 @@
 		mentionCtx = null;
 		// After clearing draft, shrink the textarea back to its base
 		// height instead of staying expanded from the previous message.
-		queueMicrotask(autosizeComposer);
 	}
 
 	async function setMessageHidden(messageId: string, hidden: boolean) {
@@ -972,25 +970,12 @@
 
 	function onComposerInput() {
 		detectMentionAtCaret();
-		autosizeComposer();
 	}
 
 	// Issue #89: grow the composer textarea with its content up to a
 	// sensible cap, then scroll inside the box. Pure DOM manipulation
 	// is fine here because there is exactly one composer per page and
-	// the resize must happen synchronously with the input event to
-	// avoid a one-frame layout flicker.
-	const COMPOSER_MAX_HEIGHT_PX = 220; // ~10 rows at our font size.
-	function autosizeComposer() {
-		if (!composer) return;
-		composer.style.height = 'auto';
-		const next = Math.min(composer.scrollHeight, COMPOSER_MAX_HEIGHT_PX);
-		composer.style.height = `${next}px`;
-		// Once we hit the cap, the textarea's own scroll takes over;
-		// the height stays put and the user scrolls inside the box.
-		composer.style.overflowY =
-			composer.scrollHeight > COMPOSER_MAX_HEIGHT_PX ? 'auto' : 'hidden';
-	}
+	
 
 	/* ---------- channel + agent CRUD ---------- */
 
@@ -1447,21 +1432,20 @@
 		</main>
 
 		<footer>
-			<div class="composer">
-				<MentionPopup
-					open={mentionCtx !== null && mentionCandidates.length > 0}
-					candidates={mentionCandidates}
-					highlightedIndex={mentionIndex}
-					onSelect={selectMention}
-				/>
-				<CartaComposer
-					value={draft.value}
-					onvalue={(v) => { draft.value = v; onComposerInput(); }}
-					onsubmit={send}
-					disabled={!connected || !activeChannelId}
-					placeholder="message — Shift+Enter for new line, @mentions"
-				/>
-			</div>
+			<MentionPopup
+				open={mentionCtx !== null && mentionCandidates.length > 0}
+				candidates={mentionCandidates}
+				highlightedIndex={mentionIndex}
+				onSelect={selectMention}
+			/>
+			<MarkdownComposer
+				value={draft.value}
+				onvalue={(v) => { draft.value = v; onComposerInput(); }}
+				onsubmit={send}
+				onkeydown={onComposerKey}
+				disabled={!connected || !activeChannelId}
+				placeholder="message — Shift+Enter for new line, @mentions"
+			/>
 			<button onclick={send} disabled={!connected || !draft.value.trim() || !activeChannelId}>Send</button>
 		</footer>
 	</section>
@@ -1879,11 +1863,7 @@
 		border-top: 1px solid var(--finn-border);
 		background: var(--finn-bg-elevated);
 	}
-	.composer {
-		flex: 1;
-		position: relative;
-		min-width: 0;
-	}
+
 	footer button {
 		background: var(--finn-accent);
 		color: #fff;
