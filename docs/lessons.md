@@ -744,3 +744,62 @@ catches the bug class entirely.
 **Sub-lesson:** *every* output surface that human eyes will see
 deserves the same UTF-8 hygiene as repository files. The
 repository is just the most obvious one.
+
+---
+
+## 5. CSS fights library internals — prefer isolation — 2026-06-12
+
+Spent several hours trying to CSS-override `carta-md`'s internal
+styles to remove tab bars, fix borders, and reduce heights. Each
+fix worked locally but broke on the next Carta update or when
+Svelte's CSS scoping interacted with Carta's own scoped hashes.
+Root causes:
+- Carta sets `height: 600px` in its default theme CSS
+- Carta's JS additionally sets inline `min-height: 64px` on the
+  textarea after mount, overriding `!important` CSS rules
+- Tab toggle buttons live in `.carta-toolbar-left`, not a `.carta-tabs`
+  element (so the obvious selector did nothing)
+
+**Fix:** Replace Carta with 60 lines of plain textarea + 4 toolbar
+buttons. Zero library fights, one border, full control.
+
+**Lesson:** When you spend more than two hours fighting a library's
+internal styles, that is the library telling you it is the wrong tool
+for the job. The measure of a good library is how little CSS you need
+to override; Carta is excellent for full-page editors, wrong for a
+compact chat composer.
+
+---
+
+## 6. Modal `open` prop silently no-ops — debug before CSS — 2026-06-10
+
+The Settings page `Edit` button for channels appeared to "do nothing"
+for several PRs. Root cause: `Modal.svelte` has `{#if open}` and
+requires `open={true}` as a prop. The `{#if channelFormMode !== 'none'}`
+wrapper in the template was correct; the `<Modal>` inside it was
+never passed `open`. Svelte rendered the Modal with `open=undefined`
+which is falsy, so the backdrop never appeared.
+
+**Symptom:** Button click updates reactive state correctly; nothing
+visible happens.
+
+**Lesson:** When a component "does nothing" after a reactive state
+change, check whether it has a boolean prop that gates rendering
+before diagnosing CSS/z-index issues. `{#if open}` inside a child
+component is invisible from the parent.
+
+---
+
+## 7. Screenshot validation requires local dev server — 2026-06-12
+
+Taking screenshots of `http://192.168.64.1:5173` (Jürgen's running
+instance) always shows the **last merged PR**, never the current
+development branch. Used this for several rounds of "validation"
+that validated nothing — the screenshots confirmed old code was
+working, not new code.
+
+**Fix:** Start finn's dev server locally (`npm run dev`) and
+screenshot `http://localhost:5173` to validate current branch.
+
+**Rule:** Never screenshot an external instance to validate a branch
+that hasn't been merged yet. Use the local dev server.
