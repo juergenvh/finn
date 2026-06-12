@@ -89,12 +89,12 @@
 </script>
 
 <div class="composer-wrap" class:disabled>
-	<!-- Floating toolbar badges -->
+	<!-- Toolbar floats ABOVE the box border: position:absolute bottom:100% -->
 	<div class="toolbar" aria-label="Formatting">
-		<button type="button" onclick={() => wrap('**', '**', 'bold')}      title="Bold (Ctrl+B)"><b>B</b></button>
-		<button type="button" onclick={() => wrap('_', '_', 'italic')}      title="Italic (Ctrl+I)"><i>I</i></button>
-		<button type="button" onclick={() => wrap('`', '`', 'code')}        title="Code (Ctrl+E)"><code>`</code></button>
-		<button type="button" onclick={insertLink}                           title="Link">🔗</button>
+		<button type="button" onclick={() => wrap('**', '**', 'bold')}  title="Bold (Ctrl+B)"><b>B</b></button>
+		<button type="button" onclick={() => wrap('_', '_', 'italic')}  title="Italic (Ctrl+I)"><i>I</i></button>
+		<button type="button" onclick={() => wrap('`', '`', 'code')}    title="Code (Ctrl+E)"><code>`</code></button>
+		<button type="button" onclick={insertLink}                       title="Link">🔗</button>
 	</div>
 
 	<textarea
@@ -107,7 +107,7 @@
 		onkeydown={handleKeydown}
 		{placeholder}
 		{disabled}
-		rows="1"
+		rows="2"
 	></textarea>
 </div>
 
@@ -120,6 +120,7 @@
 		border: 1px solid var(--finn-border);
 		border-radius: var(--finn-radius-md);
 		transition: border-color var(--finn-transition-fast);
+		overflow: visible; /* allow toolbar to float above the border */
 	}
 	.composer-wrap:focus-within {
 		border-color: var(--finn-accent);
@@ -130,37 +131,36 @@
 		pointer-events: none;
 	}
 
-	/* Floating badges — top-right corner */
+	/* Toolbar floats ABOVE the textarea border */
 	.toolbar {
 		position: absolute;
-		top: 0.25rem;
-		right: 0.35rem;
+		bottom: 100%;
+		right: 0;
+		margin-bottom: 0.2rem;
 		display: flex;
-		gap: 0.15rem;
+		gap: 0.2rem;
 		z-index: 1;
 	}
 	.toolbar button {
-		background: var(--finn-bg-elevated);
-		border: 1px solid var(--finn-border);
-		color: var(--finn-text-muted);
-		padding: 0.1rem 0.35rem;
+		background: var(--finn-accent);
+		border: none;
+		color: #fff;
+		padding: 0.15rem 0.5rem;
 		border-radius: var(--finn-radius-sm);
 		cursor: pointer;
 		font-size: 0.72rem;
-		line-height: 1.4;
+		font-weight: 600;
+		line-height: 1.5;
 		font-family: var(--finn-font-sans);
-		transition: all var(--finn-transition-fast);
-		opacity: 0.75;
+		transition: background var(--finn-transition-fast), box-shadow var(--finn-transition-fast);
 	}
 	.toolbar button:hover {
-		background: var(--finn-bg-hover);
-		color: var(--finn-text-primary);
-		border-color: var(--finn-border-hover);
-		opacity: 1;
+		background: var(--finn-accent-hover);
+		box-shadow: var(--finn-shadow-glow);
 	}
-	.toolbar button b  { font-weight: 700; }
-	.toolbar button i  { font-style: italic; }
-	.toolbar button code { font-family: var(--finn-font-mono); font-size: 0.75rem; }
+	.toolbar button b    { font-weight: 800; }
+	.toolbar button i    { font-style: italic; font-weight: 600; }
+	.toolbar button code { font-family: var(--finn-font-mono); font-size: 0.78rem; font-weight: 600; }
 
 	textarea {
 		width: 100%;
@@ -172,7 +172,6 @@
 		font-size: var(--finn-text-base);
 		line-height: 1.5;
 		padding: 0.4rem 0.5rem;
-		padding-right: 6.5rem; /* space for toolbar badges */
 		resize: none;
 		min-height: 0;
 		max-height: 10rem;
