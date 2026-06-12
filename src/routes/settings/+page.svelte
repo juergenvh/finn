@@ -13,9 +13,6 @@
 -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import AgentForm from '$lib/ui/AgentForm.svelte';
-	import type { AgentFormPayload } from '$lib/ui/AgentForm.svelte';
-	import Modal from '$lib/ui/Modal.svelte';
 
 	type Theme = 'system' | 'light' | 'dark';
 
@@ -62,9 +59,35 @@
 	const AGENT_EXPORT_SCHEMA = 'finn-agent-export-v1';
 	let agentsList = $state<AgentInfo[]>([]);
 	let agentsLoading = $state(false);
-	let agentFormMode = $state<'none' | 'create' | 'edit'>('none');
-	let editingAgent = $state<AgentInfo | null>(null);
-	let loadAgentInput: HTMLInputElement | null = $state(null);
+	let expandedAgentId = $state<string | null>(null);
+	let newAgentMode = $state(false);
+
+	type AgentDraft = {
+		name: string; enabled: boolean; connectorType: ConnectorType;
+		openclawBaseUrl: string; openclawTokenEnvVar: string; openclawModel: string; openclawSessionOverride: string;
+		oaiCompatBaseUrl: string; oaiCompatTokenEnvVar: string; oaiCompatModelHint: string;
+		stubPersona: string; stubRepliesText: string;
+		saving: boolean; error: string | null;
+	};
+	let agentDrafts = $state<Record<string, AgentDraft>>({});
+
+	function freshDraft(a?: AgentInfo): AgentDraft {
+		const cfg = (a?.config ?? {}) as Record<string, unknown>;
+		return {
+			name: a?.name ?? '', enabled: a?.enabled ?? true, connectorType: a?.connectorType ?? 'openclaw',
+			openclawBaseUrl: (cfg.base_url as string) ?? 'http://127.0.0.1:18789/v1',
+			openclawTokenEnvVar: (cfg.token_env_var as string) ?? 'FINN_OPENCLAW_API_KEY',
+			openclawModel: (cfg.model as string) ?? 'openclaw',
+			openclawSessionOverride: (cfg.session_override as string) ?? '',
+			oaiCompatBaseUrl: (cfg.base_url as string) ?? 'https://agent.example.com/v1',
+			oaiCompatTokenEnvVar: (cfg.token_env_var as string) ?? 'FINN_OPENAI_COMPAT_API_KEY',
+			oaiCompatModelHint: (cfg.model_hint as string) ?? 'default',
+			stubPersona: (cfg.persona as string) ?? 'a generic assistant',
+			stubRepliesText: Array.isArray(cfg.replies) ? (cfg.replies as string[]).join('\n') : 'notiert.\ninteressant. @dixie?\ních bleibe skeptisch.',
+			saving: false, error: null
+		};
+	}
+	let newAgentDraft = $state<AgentDraft>(freshDraft());
 	// channel membership per agent: agentId → array of {id, name}
 	let agentChannels = $state<Record<string, { id: string; name: string }[]>>({});
 
@@ -213,47 +236,87 @@
 		channelMemberMap = newMap;
 	}
 
-	async function submitAgentForm(payload: AgentFormPayload) {
-		if (payload.mode === 'create') {
-			const res = await fetch('/api/agents', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ name: payload.name, enabled: payload.enabled, config: payload.config })
-			});
-			if (!res.ok) throw new Error((await res.json()).message ?? `HTTP ${res.status}`);
-		} else {
-			if (!editingAgent) return;
-			const res = await fetch(`/api/agents/${editingAgent.id}`, {
-				method: 'PATCH',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ name: payload.name, enabled: payload.enabled, config: payload.config })
-			});
-			if (!res.ok) throw new Error((await res.json()).message ?? `HTTP ${res.status}`);
-		}
-		agentFormMode = 'none';
-		editingAgent = null;
-		await loadAgents();
-	}
-
-	async function openEditAgent(agent: AgentInfo) {
-		// Fetch full config from the single-agent endpoint before opening the form
+	async function expandAgent(agent: AgentInfo) {
+		if (expandedAgentId === agent.id) { expandedAgentId = null; return; }
+		// Load full config before expanding
 		const res = await fetch(`/api/agents/${agent.id}`);
 		if (!res.ok) return;
 		const data = await res.json();
-		editingAgent = { ...agent, config: data.config ?? {} };
-		agentFormMode = 'edit';
+		const full: AgentInfo = { ...agent, config: data.config ?? {} };
+		agentDrafts = { ...agentDrafts, [agent.id]: freshDraft(full) };
+		expandedAgentId = agent.id;
+	}
+
+	function patchDraft(id: string, patch: Partial<AgentDraft>) {
+		agentDrafts = { ...agentDrafts, [id]: { ...agentDrafts[id], ...patch } };
+	}
+
+	function buildConfig(d: AgentDraft): Record<string, unknown> {
+		if (d.connectorType === 'openclaw') {
+			const cfg: Record<string, unknown> = {
+				connector_type: 'openclaw',
+				base_url: d.openclawBaseUrl.trim(),
+				token_env_var: d.openclawTokenEnvVar.trim(),
+				model: d.openclawModel.trim()
+			};
+			if (d.openclawSessionOverride.trim()) cfg.session_override = d.openclawSessionOverride.trim();
+			return cfg;
+		}
+		if (d.connectorType === 'openai-compatible') return {
+			connector_type: 'openai-compatible',
+			base_url: d.oaiCompatBaseUrl.trim(),
+			token_env_var: d.oaiCompatTokenEnvVar.trim(),
+			model_hint: d.oaiCompatModelHint.trim()
+		};
+		return {
+			connector_type: 'anthropic-stub',
+			persona: d.stubPersona.trim(),
+			replies: d.stubRepliesText.split('\n').map(s => s.trim()).filter(Boolean)
+		};
+	}
+
+	async function saveAgentDraft(agentId: string) {
+		const d = agentDrafts[agentId];
+		if (!d || !d.name.trim()) return;
+		patchDraft(agentId, { saving: true, error: null });
+		try {
+			const res = await fetch(`/api/agents/${agentId}`, {
+				method: 'PATCH',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ name: d.name.trim(), enabled: d.enabled, config: buildConfig(d) })
+			});
+			if (!res.ok) { patchDraft(agentId, { error: `HTTP ${res.status}` }); return; }
+			expandedAgentId = null;
+			await loadAgents();
+		} finally { patchDraft(agentId, { saving: false }); }
+	}
+
+	async function saveNewAgent() {
+		const d = newAgentDraft;
+		if (!d.name.trim()) return;
+		newAgentDraft = { ...newAgentDraft, saving: true, error: null };
+		try {
+			const res = await fetch('/api/agents', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ name: d.name.trim(), enabled: d.enabled, config: buildConfig(d) })
+			});
+			if (!res.ok) { newAgentDraft = { ...newAgentDraft, error: `HTTP ${res.status}` }; return; }
+			newAgentMode = false;
+			newAgentDraft = freshDraft();
+			await loadAgents();
+		} finally { newAgentDraft = { ...newAgentDraft, saving: false }; }
 	}
 
 	async function archiveAgent(agent: AgentInfo) {
-		if (!confirm(`Archive agent "${agent.name}"? It will no longer dispatch; past messages remain attributed.`)) return;
+		if (!confirm(`Archive agent "${agent.name}"?`)) return;
 		const res = await fetch(`/api/agents/${agent.id}`, { method: 'DELETE' });
-		if (res.ok) await loadAgents();
+		if (res.ok) { expandedAgentId = null; await loadAgents(); }
 	}
 
 	async function toggleAgentEnabled(agent: AgentInfo) {
 		const res = await fetch(`/api/agents/${agent.id}`, {
-			method: 'PATCH',
-			headers: { 'content-type': 'application/json' },
+			method: 'PATCH', headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ enabled: !agent.enabled })
 		});
 		if (res.ok) await loadAgents();
@@ -264,17 +327,13 @@
 			const res = await fetch(`/api/agents/${agent.id}`);
 			if (!res.ok) { alert(`failed: ${res.status}`); return; }
 			const row = await res.json();
-			const envelope = {
-				schema: AGENT_EXPORT_SCHEMA,
-				exportedAt: new Date().toISOString(),
-				agent: { name: row.name, connectorType: row.connectorType, config: row.config }
-			};
+			const envelope = { schema: AGENT_EXPORT_SCHEMA, exportedAt: new Date().toISOString(),
+				agent: { name: row.name, connectorType: row.connectorType, config: row.config } };
 			const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url; a.download = `finn-agent-${row.name}.json`;
-			document.body.appendChild(a); a.click();
-			document.body.removeChild(a); URL.revokeObjectURL(url);
+			document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 		} catch (err) { alert(`export failed: ${(err as Error).message}`); }
 	}
 
@@ -286,21 +345,13 @@
 		if (!file) return;
 		try {
 			const parsed = JSON.parse(await file.text());
-			if (parsed?.schema !== AGENT_EXPORT_SCHEMA) {
-				alert(`unrecognised file (expected schema: ${AGENT_EXPORT_SCHEMA})`);
-				return;
-			}
+			if (parsed?.schema !== AGENT_EXPORT_SCHEMA) { alert(`unrecognised file (expected ${AGENT_EXPORT_SCHEMA})`); return; }
 			const a = parsed.agent;
-			if (!a?.name || !a?.connectorType || !a?.config) {
-				alert('file missing required fields (name, connectorType, config)');
-				return;
-			}
-			const res = await fetch('/api/agents', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ name: a.name, config: a.config, enabled: true })
-			});
-			if (!res.ok) { alert(`import failed (${res.status}): ${await res.text().then(t => t.slice(0, 200))}`); }
+			if (!a?.name || !a?.connectorType || !a?.config) { alert('file missing required fields'); return; }
+			const res = await fetch('/api/agents', { method: 'POST', headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ name: a.name, config: a.config, enabled: true }) });
+			if (!res.ok) alert(`import failed: ${res.status}`);
+			else await loadAgents();
 		} catch (err) { alert(`import failed: ${(err as Error).message}`); }
 		finally { input.value = ''; }
 	}
@@ -712,6 +763,64 @@
 	<title>Settings — finn</title>
 </svelte:head>
 
+
+{#snippet agentEditFields(d, patch)}
+	<div class="agent-edit-section">
+		<div class="field">
+			<label for="ae-name">Name</label>
+			<input id="ae-name" type="text" value={d.name} oninput={(e) => patch({ name: (e.target as HTMLInputElement).value })} placeholder="agent-name" required maxlength="80" />
+		</div>
+		<div class="field">
+			<label for="ae-type">Connector type</label>
+			<select id="ae-type" value={d.connectorType} onchange={(e) => patch({ connectorType: (e.target as HTMLSelectElement).value as 'openclaw' | 'openai-compatible' | 'anthropic-stub' })}>
+				<option value="openclaw">openclaw</option>
+				<option value="openai-compatible">openai-compatible</option>
+				<option value="anthropic-stub">anthropic-stub</option>
+			</select>
+		</div>
+		{#if d.connectorType === 'openclaw'}
+			<div class="field">
+				<label for="ae-oc-url">Base URL</label>
+				<input id="ae-oc-url" type="text" value={d.openclawBaseUrl} oninput={(e) => patch({ openclawBaseUrl: (e.target as HTMLInputElement).value })} />
+			</div>
+			<div class="field">
+				<label for="ae-oc-tok">Token env var</label>
+				<input id="ae-oc-tok" type="text" value={d.openclawTokenEnvVar} oninput={(e) => patch({ openclawTokenEnvVar: (e.target as HTMLInputElement).value })} />
+			</div>
+			<div class="field">
+				<label for="ae-oc-model">Model</label>
+				<input id="ae-oc-model" type="text" value={d.openclawModel} oninput={(e) => patch({ openclawModel: (e.target as HTMLInputElement).value })} />
+			</div>
+			<div class="field">
+				<label for="ae-oc-sess">Session override</label>
+				<input id="ae-oc-sess" type="text" value={d.openclawSessionOverride} oninput={(e) => patch({ openclawSessionOverride: (e.target as HTMLInputElement).value })} placeholder="optional" />
+			</div>
+		{:else if d.connectorType === 'openai-compatible'}
+			<div class="field">
+				<label for="ae-oai-url">Base URL</label>
+				<input id="ae-oai-url" type="text" value={d.oaiCompatBaseUrl} oninput={(e) => patch({ oaiCompatBaseUrl: (e.target as HTMLInputElement).value })} />
+			</div>
+			<div class="field">
+				<label for="ae-oai-tok">Token env var</label>
+				<input id="ae-oai-tok" type="text" value={d.oaiCompatTokenEnvVar} oninput={(e) => patch({ oaiCompatTokenEnvVar: (e.target as HTMLInputElement).value })} />
+			</div>
+			<div class="field">
+				<label for="ae-oai-hint">Model hint</label>
+				<input id="ae-oai-hint" type="text" value={d.oaiCompatModelHint} oninput={(e) => patch({ oaiCompatModelHint: (e.target as HTMLInputElement).value })} />
+			</div>
+		{:else}
+			<div class="field">
+				<label for="ae-stub-persona">Persona</label>
+				<input id="ae-stub-persona" type="text" value={d.stubPersona} oninput={(e) => patch({ stubPersona: (e.target as HTMLInputElement).value })} />
+			</div>
+			<div class="field">
+				<label for="ae-stub-replies">Replies (one per line)</label>
+				<textarea id="ae-stub-replies" rows="3" value={d.stubRepliesText} oninput={(e) => patch({ stubRepliesText: (e.target as HTMLTextAreaElement).value })}></textarea>
+			</div>
+		{/if}
+	</div>
+{/snippet}
+
 <div class="settings-page">
 	<aside class="rail">
 		<h2>Settings</h2>
@@ -858,68 +967,82 @@
 
 		{#if selected === 'agents'}
 			<div class="agent-toolbar">
-				<button type="button" class="primary" onclick={() => { agentFormMode = 'create'; editingAgent = null; }}>
-					+ New Agent
+				<button type="button" class="primary" onclick={() => { newAgentMode = !newAgentMode; newAgentDraft = freshDraft(); }}>
+					{newAgentMode ? '✕ Cancel' : '+ New Agent'}
 				</button>
-				<button type="button" title="Import agent from JSON file" onclick={triggerLoadAgent}>
-					⇧ Upload Agent
-				</button>
-				<input
-					bind:this={loadAgentInput}
-					type="file"
-					accept="application/json,.json"
-					style="display:none"
-					onchange={onLoadAgentFile}
-				/>
+				<button type="button" onclick={triggerLoadAgent} title="Import from JSON file">⇧ Upload</button>
+				<input bind:this={loadAgentInput} type="file" accept="application/json,.json" style="display:none" onchange={onLoadAgentFile} />
 			</div>
+
+			{#if newAgentMode}
+				<div class="agent-card expanded-card">
+					{@render agentEditFields(newAgentDraft, (p) => newAgentDraft = { ...newAgentDraft, ...p })}
+					<div class="expand-actions">
+						<button type="button" class="primary" onclick={saveNewAgent} disabled={newAgentDraft.saving || !newAgentDraft.name.trim()}>
+							{newAgentDraft.saving ? 'Creating…' : 'Create Agent'}
+						</button>
+						<button type="button" onclick={() => newAgentMode = false}>Cancel</button>
+						{#if newAgentDraft.error}<span class="inline-error">{newAgentDraft.error}</span>{/if}
+					</div>
+				</div>
+			{/if}
 
 			{#if agentsLoading}
 				<p class="note">Loading…</p>
-			{:else if agentsList.length === 0}
-				<p class="note empty">No agents yet. Create one to get started.</p>
+			{:else if agentsList.length === 0 && !newAgentMode}
+				<p class="note empty">No agents yet.</p>
 			{:else}
 				<div class="agent-list">
 					{#each agentsList as agent (agent.id)}
-						<div class="agent-card">
+						<div class="agent-card" class:expanded-card={expandedAgentId === agent.id}>
+							<!-- Collapsed header — always visible -->
 							<div class="agent-card-header">
 								<div class="agent-info">
 									<span class="dot" class:disabled={!agent.enabled}></span>
 									<span class="agent-name">{agent.name}</span>
 									<span class="agent-type">{agent.connectorType}</span>
 								</div>
-								<div class="agent-row-actions">
-									<button type="button" onclick={() => toggleAgentEnabled(agent)}>
-										{agent.enabled ? 'Disable' : 'Enable'}
+								<div class="agent-card-actions">
+									<!-- Overflow actions (non-primary) -->
+									<button type="button" class="icon-btn" onclick={() => saveAgentToFile(agent)} title="Export to JSON">⇩</button>
+									<button type="button" class="icon-btn danger-icon" onclick={() => archiveAgent(agent)} title="Archive">🗑</button>
+									<button
+										type="button" class="chevron-btn"
+										onclick={() => expandAgent(agent)}
+										title={expandedAgentId === agent.id ? 'Collapse' : 'Edit'}
+									>
+										{expandedAgentId === agent.id ? '▲' : '▼'}
 									</button>
-									<button type="button" onclick={() => openEditAgent(agent)}>Edit</button>
-									<button type="button" onclick={() => saveAgentToFile(agent)} title="Export agent to JSON">⇩ Save</button>
-									<button type="button" class="danger" onclick={() => archiveAgent(agent)}>Archive</button>
 								</div>
 							</div>
-
+							<!-- Channel chips — always visible -->
 							<div class="agent-channels">
-								<span class="channels-label">Channels:</span>
 								{#each (agentChannels[agent.id] ?? []) as ch (ch.id)}
-									<span class="channel-chip">
-										#{ch.name}
-										<button type="button" class="chip-remove" onclick={() => removeAgentFromChannel(agent.id, ch.id)}
-											title="Remove from #{ch.name}">×</button>
+									<span class="channel-chip">#{ch.name}
+										<button type="button" class="chip-remove" onclick={() => removeAgentFromChannel(agent.id, ch.id)}>×</button>
 									</span>
 								{/each}
-								<select
-									class="add-channel-select"
-									onchange={(e) => {
-										const chId = (e.target as HTMLSelectElement).value;
-										if (chId) addAgentToChannel(agent.id, chId);
-										(e.target as HTMLSelectElement).value = '';
-									}}
-								>
+								<select class="add-channel-select"
+									onchange={(e) => { const v = (e.target as HTMLSelectElement).value; if (v) addAgentToChannel(agent.id, v); (e.target as HTMLSelectElement).value = ''; }}>
 									<option value="">+ Add to channel…</option>
 									{#each channels.filter(ch => !(agentChannels[agent.id] ?? []).some(m => m.id === ch.id)) as ch (ch.id)}
 										<option value={ch.id}>#{ch.name}</option>
 									{/each}
 								</select>
 							</div>
+							<!-- Expanded edit area -->
+							{#if expandedAgentId === agent.id && agentDrafts[agent.id]}
+								{@const d = agentDrafts[agent.id]}
+								{@render agentEditFields(d, (p) => patchDraft(agent.id, p))}
+								<div class="expand-actions">
+									<button type="button" class="primary" onclick={() => saveAgentDraft(agent.id)} disabled={d.saving || !d.name.trim()}>
+										{d.saving ? 'Saving…' : 'Save'}
+									</button>
+									<button type="button" onclick={() => toggleAgentEnabled(agent)}>{agent.enabled ? 'Disable' : 'Enable'}</button>
+									<button type="button" onclick={() => expandedAgentId = null}>Cancel</button>
+									{#if d.error}<span class="inline-error">{d.error}</span>{/if}
+								</div>
+							{/if}
 						</div>
 					{/each}
 				</div>
@@ -1063,20 +1186,6 @@
 	</main>
 </div>
 
-{#if agentFormMode !== 'none'}
-	<Modal
-		open={true}
-		title={agentFormMode === 'create' ? 'New Agent' : 'Edit Agent'}
-		onClose={() => { agentFormMode = 'none'; editingAgent = null; }}
-	>
-		<AgentForm
-			mode={agentFormMode === 'create' ? 'create' : 'edit'}
-			agent={editingAgent ?? undefined}
-			onSubmit={submitAgentForm}
-			onCancel={() => { agentFormMode = 'none'; editingAgent = null; }}
-		/>
-	</Modal>
-{/if}
 
 <style>
 	/*
@@ -1509,5 +1618,68 @@
 	.note.empty {
 		font-style: italic;
 		color: var(--finn-text-muted);
+	}
+
+	/* ── Expand/collapse agent cards ──────────────────────────────────── */
+	.expanded-card {
+		border-color: var(--finn-accent-glow);
+	}
+	.agent-card-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+	.chevron-btn {
+		background: transparent;
+		border: 1px solid var(--finn-border);
+		color: var(--finn-text-muted);
+		padding: 0.2rem 0.5rem;
+		border-radius: var(--finn-radius-sm);
+		cursor: pointer;
+		font-size: var(--finn-text-xs);
+		transition: all var(--finn-transition-fast);
+	}
+	.chevron-btn:hover { background: var(--finn-bg-hover); color: var(--finn-text-primary); }
+	.expanded-card .chevron-btn { background: var(--finn-accent-soft); color: var(--finn-accent-hover); border-color: var(--finn-accent-glow); }
+	.icon-btn {
+		background: transparent;
+		border: none;
+		color: var(--finn-text-muted);
+		padding: 0.2rem 0.3rem;
+		cursor: pointer;
+		font-size: 0.85rem;
+		transition: color var(--finn-transition-fast);
+	}
+	.icon-btn:hover { color: var(--finn-text-secondary); }
+	.danger-icon:hover { color: var(--finn-error); }
+	.agent-edit-section {
+		padding: 0.75rem 0.85rem;
+		border-top: 1px solid var(--finn-border);
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+		background: var(--finn-bg-base);
+	}
+	.expand-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem 0.85rem;
+		border-top: 1px solid var(--finn-border);
+		background: var(--finn-bg-elevated);
+	}
+	.expand-actions .primary {
+		background: var(--finn-accent);
+		border-color: var(--finn-accent);
+		color: #fff;
+		font-weight: 500;
+	}
+	.expand-actions .primary:hover:not(:disabled) {
+		background: var(--finn-accent-hover);
+		box-shadow: var(--finn-shadow-glow);
+	}
+	.inline-error {
+		color: var(--finn-error);
+		font-size: var(--finn-text-xs);
 	}
 </style>
