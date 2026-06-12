@@ -12,5 +12,11 @@ const SECRETS_PATH = path.join(os.homedir(), 'finn-data', 'secrets', '.env');
 dotenv.config({ path: SECRETS_PATH, quiet: true });
 
 export default defineConfig({
-	plugins: [sveltekit(), finnWsDevPlugin()]
+	plugins: [sveltekit(), finnWsDevPlugin()],
+	build: {
+		// Mermaid is lazy-loaded (dynamic import in mermaid.ts) but Vite
+		// bundles it into a shared chunk that tips the 500 kB default threshold.
+		// The chunk is only 137 kB gzipped and loads lazily — no real concern.
+		chunkSizeWarningLimit: 700
+	}
 });
