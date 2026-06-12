@@ -17,6 +17,7 @@
 	import type { AgentFormPayload } from '$lib/ui/AgentForm.svelte';
 	import ChannelForm from '$lib/ui/ChannelForm.svelte';
 	import type { ChannelFormPayload } from '$lib/ui/ChannelForm.svelte';
+	import Modal from '$lib/ui/Modal.svelte';
 
 	type Theme = 'system' | 'light' | 'dark';
 
@@ -157,10 +158,8 @@
 		const res = await fetch('/api/channels');
 		if (!res.ok) return;
 		const data = await res.json();
-		// Server sorts by name (GET /api/channels, issue #92); no
-		// client-side re-sort needed.
 		channels = data.channels as ChannelInfo[];
-		await loadAllChannelMembers();
+		// Member maps and settings loaded by callers that need channels first
 	}
 
 	async function loadAgents() {
@@ -170,8 +169,7 @@
 			if (!res.ok) return;
 			const data = await res.json();
 			agentsList = data.agents as AgentInfo[];
-			// Always load channel assignments — no lazy "Show" button
-			await loadAllAgentChannels();
+			// Channel assignments loaded separately after channels are available
 		} finally {
 			agentsLoading = false;
 		}
@@ -650,7 +648,7 @@
 			if (msg.entity === 'agent') { await loadAgents(); return; }
 			if (msg.entity === 'channel' || msg.entity === 'channel_member') {
 				await loadChannels();
-				await loadAllChannelDetails();
+				await Promise.all([loadAllAgentChannels(), loadAllChannelMembers(), loadAllChannelDetails()]);
 				return;
 			}
 			if (msg.entity !== 'settings') return;
@@ -673,7 +671,8 @@
 
 	onMount(async () => {
 		await Promise.all([loadGlobal(), loadChannels(), loadAgents()]);
-		await loadAllChannelDetails();
+		// These all need channels to be loaded first
+		await Promise.all([loadAllAgentChannels(), loadAllChannelMembers(), loadAllChannelDetails()]);
 		if (global) applyThemeToHtml(global.theme);
 		listenSystemTheme();
 		const hash = window.location.hash.replace(/^#/, '');
@@ -754,7 +753,6 @@
 			<h1>Global Settings</h1>
 			<p class="note">Defaults for every channel. Per-channel overrides take precedence when set.</p>
 			{#if editGlobal && global}
-				<div class="agent-card settings-card">
 				<form
 					onsubmit={(e) => {
 						e.preventDefault();
@@ -851,8 +849,7 @@
 							Discard
 						</button>
 					</div>
-					</form>
-				</div>
+				</form>
 			{:else if !loadError}
 				<p>Loading…</p>
 			{/if}
@@ -1019,23 +1016,33 @@
 </div>
 
 {#if channelFormMode !== 'none'}
-	<ChannelForm
-		mode={channelFormMode === 'create' ? 'create' : 'edit'}
-		channel={editingChannel ?? undefined}
-		allAgents={agentsList}
-		currentMemberIds={editingChannelMembers}
-		onSubmit={submitChannelForm}
-		onCancel={() => { channelFormMode = 'none'; editingChannel = null; editingChannelMembers = []; }}
-	/>
+	<Modal
+		title={channelFormMode === 'create' ? 'New Channel' : 'Edit Channel'}
+		onClose={() => { channelFormMode = 'none'; editingChannel = null; editingChannelMembers = []; }}
+	>
+		<ChannelForm
+			mode={channelFormMode === 'create' ? 'create' : 'edit'}
+			channel={editingChannel ?? undefined}
+			allAgents={agentsList}
+			currentMemberIds={editingChannelMembers}
+			onSubmit={submitChannelForm}
+			onCancel={() => { channelFormMode = 'none'; editingChannel = null; editingChannelMembers = []; }}
+		/>
+	</Modal>
 {/if}
 
 {#if agentFormMode !== 'none'}
-	<AgentForm
-		mode={agentFormMode === 'create' ? 'create' : 'edit'}
-		agent={editingAgent ?? undefined}
-		onSubmit={submitAgentForm}
-		onCancel={() => { agentFormMode = 'none'; editingAgent = null; }}
-	/>
+	<Modal
+		title={agentFormMode === 'create' ? 'New Agent' : 'Edit Agent'}
+		onClose={() => { agentFormMode = 'none'; editingAgent = null; }}
+	>
+		<AgentForm
+			mode={agentFormMode === 'create' ? 'create' : 'edit'}
+			agent={editingAgent ?? undefined}
+			onSubmit={submitAgentForm}
+			onCancel={() => { agentFormMode = 'none'; editingAgent = null; }}
+		/>
+	</Modal>
 {/if}
 
 <style>
@@ -1394,16 +1401,7 @@
 		gap: 0.75rem;
 		border-top: 1px solid var(--finn-border);
 	}
-	/* Global settings card wrapper — matches agent-card style */
-	.settings-card {
-		padding: 0;
-	}
-	.settings-card form {
-		padding: 1rem 1.25rem;
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-	}
+
 	.note.empty {
 		font-style: italic;
 		color: var(--finn-text-muted);
