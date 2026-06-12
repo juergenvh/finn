@@ -969,8 +969,8 @@
 								{@const det = channelDetailsMap[ch.id]}
 								<form class="ch-settings-form" onsubmit={(e) => { e.preventDefault(); saveChannelInline(ch.id); }}>
 									<div class="field">
-										<label>KB budget override</label>
-										<input type="number" min="1" max="100000" step="1"
+										<label for="kb-{ch.id}">KB budget override</label>
+										<input id="kb-{ch.id}" type="number" min="1" max="100000" step="1"
 											placeholder="inherit ({global.kbBudgetDefault})"
 											value={ed.budgetText}
 											oninput={(e) => patchChannelEdit(ch.id, { budgetText: (e.target as HTMLInputElement).value })}
@@ -979,15 +979,15 @@
 										<span class="hint">Empty = inherit global ({global.kbBudgetDefault} KB)</span>
 									</div>
 									<div class="field">
-										<label>Auto-approve agent mentions</label>
-										<input type="checkbox" checked={ed.autoApprove}
+										<label for="aa-{ch.id}">Auto-approve agent mentions</label>
+										<input id="aa-{ch.id}" type="checkbox" checked={ed.autoApprove}
 											onchange={(e) => patchChannelEdit(ch.id, { autoApprove: (e.target as HTMLInputElement).checked })}
 										/>
 										<span class="hint">Skip approval queue for agent→agent mentions</span>
 									</div>
 									<div class="field">
-										<label>Roundtrip cap override</label>
-										<input type="number" min="1" max="100" step="1"
+										<label for="rc-{ch.id}">Roundtrip cap override</label>
+										<input id="rc-{ch.id}" type="number" min="1" max="100" step="1"
 											placeholder="inherit ({global.roundtripCapDefault})"
 											value={ed.roundtripText}
 											oninput={(e) => patchChannelEdit(ch.id, { roundtripText: (e.target as HTMLInputElement).value })}
