@@ -1313,14 +1313,14 @@
 	});
 </script>
 
+<svelte:window onclick={(e) => {
+	if (!(e.target as Element).closest('.channel-picker')) channelDropdownOpen = false;
+	if (!(e.target as Element).closest('.row-wrapper')) openMenu = null;
+}} />
+
 <div class="root">
 	<!-- TOP NAVIGATION (#147) -->
-	<nav class="top-nav" onclick={(e) => {
-		// Close channel dropdown on outside click
-		if (!(e.target as Element).closest('.channel-picker')) channelDropdownOpen = false;
-		// Close row menus on outside click
-		if (!(e.target as Element).closest('.row-wrapper')) openMenu = null;
-	}}>
+	<nav class="top-nav">
 		<div class="nav-left">
 			<div class="brand-compact">
 				<span class="brand-logo">F</span>
