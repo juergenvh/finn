@@ -572,6 +572,20 @@
 		if (!res.ok) saveError = `Save failed: ${res.status}`;
 	}
 
+	async function addAgentToChannelCard(agentId: string, channelId: string) {
+		const res = await fetch(`/api/channels/${channelId}/members`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ agent_id: agentId })
+		});
+		if (res.ok) await loadAllChannelMembers();
+	}
+
+	async function removeAgentFromChannelCard(agentId: string, channelId: string) {
+		const res = await fetch(`/api/channels/${channelId}/members/${agentId}`, { method: 'DELETE' });
+		if (res.ok) await loadAllChannelMembers();
+	}
+
 	async function resetChannelInline(chId: string) {
 		if (!confirm('Reset all per-channel overrides?')) return;
 		const res = await fetch(`/api/settings/channel/${encodeURIComponent(chId)}`, { method: 'DELETE' });
@@ -750,8 +764,6 @@
 		{/if}
 
 		{#if selected === 'global'}
-			<h1>Global Settings</h1>
-			<p class="note">Defaults for every channel. Per-channel overrides take precedence when set.</p>
 			{#if editGlobal && global}
 				<form
 					onsubmit={(e) => {
@@ -857,9 +869,6 @@
 
 
 		{#if selected === 'agents'}
-			<h1>Agents</h1>
-			<p class="note">Manage all agents. Assign them to channels here or from the channel view.</p>
-
 			<div class="agent-toolbar">
 				<button type="button" class="primary" onclick={() => { agentFormMode = 'create'; editingAgent = null; }}>
 					+ New Agent
@@ -930,9 +939,6 @@
 		{/if}
 
 		{#if selected === 'channels'}
-			<h1>Channels</h1>
-			<p class="note">Create, edit and archive channels.</p>
-
 			<div class="agent-toolbar">
 				<button type="button" class="primary" onclick={() => { channelFormMode = 'create'; editingChannel = null; }}>
 					+ New Channel
@@ -959,21 +965,40 @@
 							<div class="agent-channels">
 								<span class="channels-label">Agents:</span>
 								{#each (channelMemberMap[ch.id] ?? []) as m (m.id)}
-									<span class="channel-chip">{m.name}</span>
+									<span class="channel-chip">
+										{m.name}
+										<button type="button" class="chip-remove"
+											onclick={() => removeAgentFromChannelCard(m.id, ch.id)}
+											title="Remove {m.name}">×</button>
+									</span>
 								{:else}
 									<span class="channels-label" style="font-style:italic">none</span>
 								{/each}
+								<select
+									class="add-channel-select"
+									onchange={(e) => {
+										const agentId = (e.target as HTMLSelectElement).value;
+										if (agentId) addAgentToChannelCard(agentId, ch.id);
+										(e.target as HTMLSelectElement).value = '';
+									}}
+								>
+									<option value="">+ Add agent…</option>
+									{#each agentsList.filter(a => !(channelMemberMap[ch.id] ?? []).some(m => m.id === a.id)) as a (a.id)}
+										<option value={a.id}>{a.name}</option>
+									{/each}
+								</select>
 							</div>
 							{#if channelEditsMap[ch.id] && channelDetailsMap[ch.id] && global}
 								{@const ed = channelEditsMap[ch.id]}
 								{@const det = channelDetailsMap[ch.id]}
-								<form class="ch-settings-form" onsubmit={(e) => { e.preventDefault(); saveChannelInline(ch.id); }}>
+								<div class="ch-settings-form">
 									<div class="field">
 										<label for="kb-{ch.id}">KB budget override</label>
 										<input id="kb-{ch.id}" type="number" min="1" max="100000" step="1"
 											placeholder="inherit ({global.kbBudgetDefault})"
 											value={ed.budgetText}
 											oninput={(e) => patchChannelEdit(ch.id, { budgetText: (e.target as HTMLInputElement).value })}
+											onblur={() => saveChannelInline(ch.id)}
 										/>
 										<span class="unit">KB</span>
 										<span class="hint">Empty = inherit global ({global.kbBudgetDefault} KB)</span>
@@ -981,7 +1006,7 @@
 									<div class="field">
 										<label for="aa-{ch.id}">Auto-approve agent mentions</label>
 										<input id="aa-{ch.id}" type="checkbox" checked={ed.autoApprove}
-											onchange={(e) => patchChannelEdit(ch.id, { autoApprove: (e.target as HTMLInputElement).checked })}
+											onchange={(e) => { patchChannelEdit(ch.id, { autoApprove: (e.target as HTMLInputElement).checked }); saveChannelInline(ch.id); }}
 										/>
 										<span class="hint">Skip approval queue for agent→agent mentions</span>
 									</div>
@@ -991,21 +1016,16 @@
 											placeholder="inherit ({global.roundtripCapDefault})"
 											value={ed.roundtripText}
 											oninput={(e) => patchChannelEdit(ch.id, { roundtripText: (e.target as HTMLInputElement).value })}
+											onblur={() => saveChannelInline(ch.id)}
 										/>
 										<span class="unit">hops</span>
 										<span class="hint">Empty = inherit global ({global.roundtripCapDefault})</span>
 									</div>
-									<div class="actions">
-										<button type="submit" disabled={ed.saving}>{ed.saving ? 'Saving…' : 'Save'}</button>
-										<button type="button" class="secondary"
-											onclick={() => patchChannelEdit(ch.id, {
-												budgetText: det.kbBudgetOverride?.toString() ?? '',
-												autoApprove: det.autoApprove,
-												roundtripText: det.roundtripCapOverride?.toString() ?? ''
-											})}>Discard</button>
-										<button type="button" class="danger" onclick={() => resetChannelInline(ch.id)}>Reset to global</button>
+									<div class="ch-settings-footer">
+										{#if ed.saving}<span class="saving-label">Saving…</span>{/if}
+										<button type="button" class="reset-link" onclick={() => resetChannelInline(ch.id)}>Reset to global</button>
 									</div>
-								</form>
+								</div>
 							{/if}
 						</div>
 					{/each}
@@ -1017,6 +1037,7 @@
 
 {#if channelFormMode !== 'none'}
 	<Modal
+		open={true}
 		title={channelFormMode === 'create' ? 'New Channel' : 'Edit Channel'}
 		onClose={() => { channelFormMode = 'none'; editingChannel = null; editingChannelMembers = []; }}
 	>
@@ -1033,6 +1054,7 @@
 
 {#if agentFormMode !== 'none'}
 	<Modal
+		open={true}
 		title={agentFormMode === 'create' ? 'New Agent' : 'Edit Agent'}
 		onClose={() => { agentFormMode = 'none'; editingAgent = null; }}
 	>
@@ -1128,13 +1150,17 @@
 	}
 
 	.pane {
-		padding: 24px 32px;
-		max-width: 720px;
+		padding: 1.25rem 1.5rem;
+		overflow-y: auto;
+		min-height: 0;
 	}
 
-	.pane h1 {
-		margin-top: 0;
-		color: var(--finn-text-primary);
+	/* agent-list in pane: 2-column grid when space allows */
+	.pane .agent-list {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+		gap: 0.6rem;
+		align-items: start;
 	}
 
 	.note {
@@ -1240,16 +1266,7 @@
 		background: var(--finn-bg-hover);
 	}
 
-	.actions button.danger {
-		background: transparent;
-		color: var(--finn-error);
-		border-color: var(--finn-error);
-		margin-left: auto;
-	}
 
-	.actions button.danger:hover:not(:disabled) {
-		background: var(--finn-error-bg);
-	}
 
 	.error {
 		color: var(--finn-error);
@@ -1393,14 +1410,73 @@
 		font-size: var(--finn-text-xs);
 		cursor: pointer;
 	}
-	/* Inline channel settings form */
+	/* Inline channel settings — auto-saves on blur/change, no Save button */
 	.ch-settings-form {
-		padding: 0.75rem 0.85rem;
+		padding: 0.6rem 0.85rem;
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.5rem 1rem;
+		border-top: 1px solid var(--finn-border);
+		font-family: var(--finn-font-sans);
+		font-size: var(--finn-text-xs);
+	}
+	.ch-settings-form .field {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
-		border-top: 1px solid var(--finn-border);
+		gap: 0.2rem;
 	}
+	.ch-settings-form label {
+		color: var(--finn-text-muted);
+		font-size: var(--finn-text-xs);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.ch-settings-form input[type="number"] {
+		background: var(--finn-bg-input);
+		border: 1px solid var(--finn-border);
+		color: var(--finn-text-primary);
+		border-radius: var(--finn-radius-sm);
+		padding: 0.2rem 0.4rem;
+		font-family: inherit;
+		font-size: var(--finn-text-xs);
+		width: 8rem;
+		transition: border-color var(--finn-transition-fast);
+	}
+	.ch-settings-form input[type="number"]:focus {
+		outline: none;
+		border-color: var(--finn-accent);
+	}
+	.ch-settings-form .hint {
+		color: var(--finn-text-disabled);
+		font-size: 0.7rem;
+	}
+	.ch-settings-form .unit {
+		color: var(--finn-text-muted);
+		font-size: var(--finn-text-xs);
+	}
+	.ch-settings-footer {
+		grid-column: 1 / -1;
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding-top: 0.25rem;
+	}
+	.saving-label {
+		font-size: var(--finn-text-xs);
+		color: var(--finn-text-muted);
+		font-style: italic;
+	}
+	.reset-link {
+		background: transparent;
+		border: none;
+		color: var(--finn-text-muted);
+		font-size: var(--finn-text-xs);
+		cursor: pointer;
+		padding: 0;
+		text-decoration: underline;
+		transition: color var(--finn-transition-fast);
+	}
+	.reset-link:hover { color: var(--finn-error); }
 
 	.note.empty {
 		font-style: italic;
