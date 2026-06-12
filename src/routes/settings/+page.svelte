@@ -73,6 +73,8 @@
 	let channelFormMode = $state<'none' | 'create' | 'edit'>('none');
 	let editingChannel = $state<(typeof channels)[0] | null>(null);
 	let editingChannelMembers = $state<string[]>([]);
+	// agent membership per channel: channelId → array of {id, name}
+	let channelMemberMap = $state<Record<string, { id: string; name: string }[]>>({});
 	let channelDetail = $state<ChannelSettings | null>(null);
 	let loadError = $state<string | null>(null);
 	let saveError = $state<string | null>(null);
@@ -159,6 +161,7 @@
 		// Server sorts by name (GET /api/channels, issue #92); no
 		// client-side re-sort needed.
 		channels = data.channels as ChannelInfo[];
+		await loadAllChannelMembers();
 	}
 
 	async function loadAgents() {
@@ -168,9 +171,43 @@
 			if (!res.ok) return;
 			const data = await res.json();
 			agentsList = data.agents as AgentInfo[];
+			// Always load channel assignments — no lazy "Show" button
+			await loadAllAgentChannels();
 		} finally {
 			agentsLoading = false;
 		}
+	}
+
+	async function loadAllAgentChannels() {
+		const newMap: Record<string, { id: string; name: string }[]> = {};
+		await Promise.all(
+			channels.map(async (ch) => {
+				const r = await fetch(`/api/channels/${ch.id}/members`);
+				if (!r.ok) return;
+				const d = await r.json();
+				for (const m of (d.members ?? []) as { id: string }[]) {
+					if (!newMap[m.id]) newMap[m.id] = [];
+					newMap[m.id].push({ id: ch.id, name: ch.name });
+				}
+			})
+		);
+		agentChannels = newMap;
+	}
+
+	async function loadAllChannelMembers() {
+		const newMap: Record<string, { id: string; name: string }[]> = {};
+		await Promise.all(
+			channels.map(async (ch) => {
+				const r = await fetch(`/api/channels/${ch.id}/members`);
+				if (!r.ok) return;
+				const d = await r.json();
+				newMap[ch.id] = (d.members ?? []).map((m: { id: string; name: string }) => ({
+					id: m.id,
+					name: m.name
+				}));
+			})
+		);
+		channelMemberMap = newMap;
 	}
 
 	async function submitAgentForm(payload: AgentFormPayload) {
@@ -347,6 +384,7 @@
 		editingChannel = null;
 		editingChannelMembers = [];
 		await loadChannels();
+		await loadAllAgentChannels(); // keep agent chip assignments in sync
 	}
 
 	async function archiveChannel(ch: (typeof channels)[0]) {
@@ -652,7 +690,7 @@
 				class:active={selected === 'agents'}
 				onclick={() => (selected = 'agents')}
 			>
-				Manage Agents
+				Agents
 			</button>
 			<div class="rail-divider">Channels</div>
 			<button
@@ -660,7 +698,7 @@
 				class:active={selected === 'channels'}
 				onclick={() => (selected = 'channels')}
 			>
-				Manage Channels
+				Channels
 			</button>
 			{#each channels as ch (ch.id)}
 				<button
@@ -688,11 +726,10 @@
 		{/if}
 
 		{#if selected === 'global'}
-			<h1>Global settings</h1>
-			<p class="note">
-				These values are the default for every channel. Per-channel overrides win when set.
-			</p>
+			<h1>Global Settings</h1>
+			<p class="note">Defaults for every channel. Per-channel overrides take precedence when set.</p>
 			{#if editGlobal && global}
+				<div class="agent-card settings-card">
 				<form
 					onsubmit={(e) => {
 						e.preventDefault();
@@ -790,6 +827,7 @@
 						</button>
 					</div>
 				</form>
+				</div>
 			{:else if !loadError}
 				<p>Loading…</p>
 			{/if}
@@ -924,33 +962,27 @@
 							</div>
 
 							<div class="agent-channels">
-								{#if !agentChannels[agent.id]}
-									<button type="button" class="load-channels-btn" onclick={() => loadAgentChannels(agent.id)}>
-										Show channel assignments
-									</button>
-								{:else}
-									<span class="channels-label">Channels:</span>
-									{#each agentChannels[agent.id] as ch (ch.id)}
-										<span class="channel-chip">
-											#{ch.name}
-											<button type="button" class="chip-remove" onclick={() => removeAgentFromChannel(agent.id, ch.id)}
-												title="Remove from #{ch.name}">×</button>
-										</span>
+								<span class="channels-label">Channels:</span>
+								{#each (agentChannels[agent.id] ?? []) as ch (ch.id)}
+									<span class="channel-chip">
+										#{ch.name}
+										<button type="button" class="chip-remove" onclick={() => removeAgentFromChannel(agent.id, ch.id)}
+											title="Remove from #{ch.name}">×</button>
+									</span>
+								{/each}
+								<select
+									class="add-channel-select"
+									onchange={(e) => {
+										const chId = (e.target as HTMLSelectElement).value;
+										if (chId) addAgentToChannel(agent.id, chId);
+										(e.target as HTMLSelectElement).value = '';
+									}}
+								>
+									<option value="">+ Add to channel…</option>
+									{#each channels.filter(ch => !(agentChannels[agent.id] ?? []).some(m => m.id === ch.id)) as ch (ch.id)}
+										<option value={ch.id}>#{ch.name}</option>
 									{/each}
-									<select
-										class="add-channel-select"
-										onchange={(e) => {
-											const chId = (e.target as HTMLSelectElement).value;
-											if (chId) addAgentToChannel(agent.id, chId);
-											(e.target as HTMLSelectElement).value = '';
-										}}
-									>
-										<option value="">+ Add to channel…</option>
-										{#each channels.filter(ch => !(agentChannels[agent.id] ?? []).some(m => m.id === ch.id)) as ch (ch.id)}
-											<option value={ch.id}>#{ch.name}</option>
-										{/each}
-									</select>
-								{/if}
+								</select>
 							</div>
 						</div>
 					{/each}
@@ -960,7 +992,7 @@
 
 		{#if selected === 'channels'}
 			<h1>Channels</h1>
-			<p class="note">Create, edit, and archive channels. Switch channels from the main view.</p>
+			<p class="note">Create, edit and archive channels.</p>
 
 			<div class="agent-toolbar">
 				<button type="button" class="primary" onclick={() => { channelFormMode = 'create'; editingChannel = null; }}>
@@ -976,16 +1008,25 @@
 						<div class="agent-card">
 							<div class="agent-card-header">
 								<div class="agent-info">
-									<span class="agent-name">#{ ch.name}</span>
+									<span class="dot"></span>
+									<span class="agent-name">#{ch.name}</span>
 									{#if ch.description}
 										<span class="agent-type">{ch.description}</span>
 									{/if}
 								</div>
 								<div class="agent-row-actions">
 									<button type="button" onclick={() => openEditChannel(ch)}>Edit</button>
-									<button type="button" onclick={() => selected = ch.id} title="Channel settings">⚙</button>
+									<button type="button" onclick={() => (selected = ch.id)} title="Advanced settings">⚙</button>
 									<button type="button" class="danger" onclick={() => archiveChannel(ch)}>Archive</button>
 								</div>
+							</div>
+							<div class="agent-channels">
+								<span class="channels-label">Agents:</span>
+								{#each (channelMemberMap[ch.id] ?? []) as m (m.id)}
+									<span class="channel-chip">{m.name}</span>
+								{:else}
+									<span class="channels-label" style="font-style:italic">none</span>
+								{/each}
 							</div>
 						</div>
 					{/each}
@@ -1368,16 +1409,16 @@
 		font-size: var(--finn-text-xs);
 		cursor: pointer;
 	}
-	.load-channels-btn {
-		background: transparent;
-		border: none;
-		color: var(--finn-text-muted);
-		font-size: var(--finn-text-xs);
-		cursor: pointer;
+	/* Global settings card wrapper — matches agent-card style */
+	.settings-card {
 		padding: 0;
-		text-decoration: underline;
 	}
-	.load-channels-btn:hover { color: var(--finn-text-secondary); }
+	.settings-card form {
+		padding: 1rem 1.25rem;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
 	.note.empty {
 		font-style: italic;
 		color: var(--finn-text-muted);
