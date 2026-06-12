@@ -27,9 +27,7 @@ All phase 1 (daily-use blocker) issues are closed: token-streaming
 with reply-sequencing (ADR-0013), per-message token-usage display
 (#43), markdown rich-rendering with mention spans and the
 ResizeObserver scroll discipline (ADR-0016 / #1). Manual message
-forwarding (ADR-0014) is live. Open work is now phase 2 (settings
-surface, auto-approve channels, member-selection UX) and
-discovery items — see §"Roadmap". Wintermute and any other
+forwarding (ADR-0014) is live. Settings surface, UI refresh, top-nav, per-channel drafts, memory export, CSP headers, and markdown composer all shipped. See §"Roadmap" for current open work. Wintermute and any other
 OpenAI-compatible backend are reachable via the
 `openai-compatible` connector type.
 
@@ -316,7 +314,8 @@ GET    /api/channels                              list active channels
 GET    /api/channels/:id/messages                 message history
                                                   (?limit=&before= | ?budget=<kb>)
 GET    /api/channels/:id/search?q=                substring search in channel
-GET    /api/channels/:id/export?format=md         single-channel markdown download
+GET    /api/channels/:id/export?format=md|memory  single-channel markdown or memory-log download
+                                                  (?since=ISO&until=ISO for memory format)
 GET    /api/channels/:id/members                  channel members
 GET    /api/channels/:id/approvals                approval state hydration
 GET    /api/agents                                list active agents
@@ -326,8 +325,19 @@ GET    /api/protocol                              cross-channel audit query
                                                   (filters: channels=&q=&sender_types=&
                                                    senders=&from=&to=&visibility=&
                                                    only_rejected=&cursor=&limit=)
-GET    /api/protocol/export?format=md             cross-channel markdown download
+GET    /api/protocol/export?format=md|memory      cross-channel markdown or memory-log download
                                                   (same filter params)
+```
+
+Write:
+
+```
+GET    /api/settings                              global settings
+PATCH  /api/settings                              save global settings
+GET    /api/settings?channelId=<id>               per-channel settings
+PATCH  /api/settings/channel/<id>                 save per-channel override
+DELETE /api/settings/channel/<id>                 reset to global
+DELETE /api/inflight-messages/<id>                dismiss inflight bubble (PR #120)
 ```
 
 The channel `messages` endpoint has two modes: `limit`+`before` for
@@ -387,8 +397,8 @@ In ascending order of integration weight:
    chip-input PR #61.
 6. **Log surface** ✓ — backwards pagination ('Load older'),
    per-channel substring search, sender / system / rejected-
-   approval filters in the sidebar, full-channel markdown export
-   as browser download. ADR-0009.
+   full-channel markdown export as browser download, memory-log
+   export for agent daily notes. ADR-0009, #117.
 7. **Mention autocomplete** ✓ — typing `@` in the composer pops
    up channel-member candidates, keyboard-navigable. ADR-0009 §5/6.
 8. **User-mention dispatch filtering** ✓ — `@gwen hi` in a
@@ -456,6 +466,35 @@ In ascending order of integration weight:
     `message_end` with a 150 ms fade transition. Parse / render
     failures fall back to a monospace source block with a small
     inline error caption. ADR-0022, issue #80.
+18. **Image rendering in bubbles** ✓ — HTTPS image URLs render inline.
+    Scheme-gated (HTTPS only), DOMPurify post-pass, max-width
+    constrained, graceful error fallback. CSP `img-src https:`
+    keeps cross-origin image loads under policy. ADR-0023.
+19. **Top-navigation layout** ✓ — sidebar removed; full-width chat.
+    Top nav: brand + channel dropdown, search + export + filter pills
+    (system/rejected/groomed), protocol link + settings gear.
+    Agent toggle bar below nav: per-channel agent chips with
+    enable/disable toggle. PRs #147, #154, #155.
+20. **Settings surface** ✓ — `/settings` with Global/Agents/Channels
+    rail. Inline expand/collapse per agent card (no modal); inline
+    per-channel settings; channel name/description edited in-place.
+    Theme picker, KB budget + roundtrip cap overrides, auto-approve
+    per channel. ADR-0019, PRs #148/#149/#154–#169.
+21. **Per-channel composer draft** ✓ — switching channels preserves
+    in-progress messages; cleared on send. PR #121.
+22. **Protocol viewer markdown rendering** ✓ — messages render via
+    the same `renderMarkdown()` pipeline as chat bubbles. Raw/rendered
+    toggle in the sidebar. Memory-log export (`format=memory`) produces
+    a structured markdown file suitable as `memory/YYYY-MM-DD.md`.
+    PRs #125, #126.
+23. **Content Security Policy** ✓ — `script-src 'nonce-{n}'`,
+    `frame-ancestors 'none'`, `object-src 'none'`, `img-src https: data:`,
+    plus `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
+    `Permissions-Policy`. Inter font self-hosted (no CDN). PR #124.
+24. **Markdown composer** ✓ — chat input is a plain textarea with
+    Bold / Italic / Code / Link toolbar buttons that insert markdown
+    syntax. Keyboard shortcuts Ctrl+B/I/E. Auto-expands up to 10 rem.
+    `MarkdownComposer.svelte`, PR #177.
 
 ## What this is **not** doing
 
@@ -566,80 +605,64 @@ represented what stood between the spike and finn being a tool
 you reach for every day. Marker reached on 2026-05-09. See
 §"Closed since the last roadmap refresh" below for the trail.
 
-**Phase 2 — quality-of-life:**
+**Phase 2 — quality-of-life:** *substantially complete.*
 
-* **#18** Settings surface — global defaults vs per-channel
-  overrides for KB budget and other knobs.
-* **#26** Channel-create member selection UX (email-client-style
-  chips).
-* **#28** Per-channel toggle to auto-approve agent-to-agent
-  mentions. Design pinned in **ADR-0015** (audit modal,
-  loop defences, capability probe, role labels); implementation
-  staged into three PRs.
+* **#18** Settings surface ✅ — shipped across PRs #148–#169.
+  Global defaults, per-channel overrides, inline agent/channel
+  management, theme picker, auto-approve toggle.
+* **#26** Channel-create member selection ✅ — PR #61.
+* **#28** Auto-approve agent mentions ✅ — ADR-0015, shipped.
+* **#106** CSP headers ✅ — PR #124.
+* **#114** Per-channel draft ✅ — PR #121.
+* **#117** Memory-log export ✅ — PR #125.
+* **#147** Top-nav + sidebar removal ✅ — PR #156.
 
-*(#26 — channel-create member selection chip UI — closed via
-PR #61.)*
+**Open work:**
 
-**Phase 3 — nice-to-have / discovery:**
+* **#6** Discovery: session memory (finn ↔ agent ↔ user).
+  Parked; #117 memory export is the first concrete step.
+* **#30** Protocol viewer: archived channels missing from
+  channel filter. Parked until deployment (#110) is settled.
+* **#46** Multi-User with SSO. Long-term; parked.
+* **#105** Image paste/upload in composer — nice-to-have.
+* **#110** Containerised deployment + reverse-proxy auth.
+  Actively needed for hoschis-pit.
+* Markdown composer toolbar polish (#177 shipped v1;
+  button placement + styling follow-up pending).
 
-* **#6** Discovery: where session memory lives
-  (finn ↔ agent ↔ user) — plus the addendum on memory-storage
-  signalling from connectors.
-* **#22** Discovery: connector backend-model override
-  (`x-openclaw-model`).
-* **#25** Bug: cannot reuse channel name after archive.
-* **#30** Discovery: protocol-viewer audit-aware channel picker
-  (archived channels missing from the filter).
-
-*(#49 — finn artwork in sidebar brand area — closed via PR #62.)*
-
-**Unphased / discovery:**
-
-* **#46** Discovery: Multi-User with SSO and separate creds.
-  Strategic question that may reshape the deployment story
-  entirely; not slotted into a phase yet.
-
-Follow-ups under earlier issues:
+**Unphased / follow-up:**
 
 * SQLite FTS5 / ranked search when LIKE feels slow.
 * Range-select mark-and-export of a channel slice.
 * Date-jumper / calendar pagination for very long channels.
-* Persisted per-user filter preferences (folds into #18).
-* Server-side `~/finn-data/exports/` write alongside the
-  browser download.
-* Syntax highlighting in fenced code blocks (ADR-0016 noted as
-  out-of-scope for the rich-rendering pass; own future ADR + PR).
-* Click-through behaviour on `@-mention` spans (member-detail
-  panel; folds into #18-adjacent surfaces).
-
-**Closed since the last roadmap refresh** (2026-05-08–2026-05-09):
-
-* **#3** Token-streaming + reply-sequencing — ADR-0013 phases
-  1–3 + post-phase-3 sweep all shipped (PRs #39, #41, #42,
-  #45, #47).
-* **#43** Token-usage display — Part A status icon (PR #44),
-  Part B per-message footer (PRs #50, #51), always-on footer
-  consistency follow-up rolled into #1 (PR #58).
-* **#1** Rich-rendering for message bubbles — ADR-0016, PR #58.
-  Closes phase 1.
-* **#52** Manual message forwarding — ADR-0014 (PRs #53, #54).
-* **#26** Channel-create member selection chip UI — PR #61
-  (no ADR; UI-component refactor without trust-model
-  implications, design pinned in the issue's discovery
-  comment).
-* **#49** Sidebar artwork — PR #62 (visual polish; the WebP
-  asset lives in `static/`, exported from the README image at
-  2× display size for retina).
-* **#23**, **#27**, **#34**, **#36** — see prior daily logs.
-* `#channel` autocomplete in the composer.
-* `?channel=<id>` query-param handler at `/` so the protocol
-  viewer's channel-pill links land on the right channel.
-* Tab-switcher layout once a third audit-style surface
-  appears (ADR-0010 §1 'when to revisit').
-
-Other known work, not yet ticketed:
-
+* Server-side `~/finn-data/exports/` write alongside the browser download.
+* Syntax highlighting in fenced code blocks (ADR-0016 §out-of-scope).
 * Real Anthropic connector (replaces the stub).
+* WYSIWYG markdown input (TipTap) — deferred, UX decision pending.
+
+**Closed since last roadmap refresh** (2026-05-08 – 2026-06-12):
+
+*Phase 1 (daily-use blockers) — all closed 2026-05-09:*
+* **#3** Streaming + sequencing (ADR-0013, PRs #39–#47)
+* **#43** Token-usage display (PRs #44, #50, #51, #58)
+* **#1** Rich-rendering (ADR-0016, PR #58)
+* **#52** Manual forwarding (ADR-0014, PRs #53, #54)
+* **#26** Channel-create chip input (PR #61)
+
+*Phase 2 + quality-of-life — 2026-05-09 to 2026-06-12:*
+* **#18** Settings surface (PRs #148–#169)
+* **#25** Channel name reuse after archive (PR #123)
+* **#28** Auto-approve channels (ADR-0015, shipped)
+* **#80** Mermaid rendering (ADR-0022)
+* **#106** CSP headers (PR #124)
+* **#114** Per-channel draft (PR #121)
+* **#115** Email addresses swallowing messages (PR #119)
+* **#117** Memory-log export (PR #125)
+* **#118** Inflight bubble ordering + dismiss (PR #120)
+* **#129–#147** UI refresh: warp-style tokens, top-nav,
+  agent toggle bar, sidebar removal (PRs #142–#156)
+* **#148/#154** Settings: agent + channel management (PRs #149–#155)
+* **#22** Closed — no demand (connector model override)
 * Approval-recovery on server restart while a row is `approved`.
 * Tests (unit + integration; current debt).
 * `launchd` plist for `npm run start` once the spike stabilises.
