@@ -1366,6 +1366,7 @@
 				/>
 			</div>
 			<button class="export-btn" onclick={exportChannel} title="export to markdown">Export</button>
+			<div class="nav-sep" aria-hidden="true"></div>
 			<div class="filter-pills">
 				<button class="filter-pill" class:active={hideSystem} onclick={() => (hideSystem = !hideSystem)} title="hide system messages">system</button>
 				<button class="filter-pill" class:active={hideRejected} onclick={() => (hideRejected = !hideRejected)} title="hide rejected approvals">rejected</button>
@@ -1658,6 +1659,47 @@
 		justify-content: center;
 	}
 	.search-wrap { position: relative; }
+	/* Search input inside the top nav */
+	.search-wrap input {
+		background: var(--finn-bg-input);
+		border: 1px solid var(--finn-border);
+		color: var(--finn-text-primary);
+		padding: 0.3rem 0.6rem;
+		font-family: inherit;
+		font-size: var(--finn-text-sm);
+		border-radius: var(--finn-radius-sm);
+		width: 13rem;
+		transition: border-color var(--finn-transition-fast);
+	}
+	.search-wrap input:focus {
+		outline: none;
+		border-color: var(--finn-accent);
+	}
+	.search-wrap input::placeholder { color: var(--finn-text-disabled); }
+	/* Export button in the top nav */
+	.export-btn {
+		background: var(--finn-bg-surface);
+		color: var(--finn-text-secondary);
+		border: 1px solid var(--finn-border);
+		padding: 0.3rem 0.65rem;
+		font-family: inherit;
+		font-size: var(--finn-text-sm);
+		border-radius: var(--finn-radius-sm);
+		cursor: pointer;
+		transition: background var(--finn-transition-fast), border-color var(--finn-transition-fast);
+	}
+	.export-btn:hover {
+		background: var(--finn-bg-hover);
+		border-color: var(--finn-border-hover);
+	}
+	/* Separator pushing filter pills toward the right */
+	.nav-sep {
+		width: 1px;
+		height: 1.2rem;
+		background: var(--finn-border);
+		flex-shrink: 0;
+		margin: 0 0.25rem;
+	}
 	.filter-pills {
 		display: flex;
 		align-items: center;
