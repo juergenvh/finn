@@ -86,6 +86,33 @@
 		ta.style.height = 'auto';
 		ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
 	}
+
+	function handlePaste(e: ClipboardEvent) {
+		const items = e.clipboardData?.items;
+		if (!items) return;
+		for (const item of items) {
+			if (item.type.startsWith('image/')) {
+				e.preventDefault();
+				const file = item.getAsFile();
+				if (!file) return;
+				const reader = new FileReader();
+				reader.onload = () => {
+					const dataUrl = reader.result as string;
+					const md = `![image](${dataUrl})`;
+					if (!ta) return;
+					const start = ta.selectionStart;
+					const before = value.slice(0, start);
+					const after = value.slice(ta.selectionEnd);
+					const sep = before.length > 0 && !before.endsWith('\n') ? '\n' : '';
+					onvalue(before + sep + md + '\n' + after);
+					autosize();
+				};
+				reader.readAsDataURL(file);
+				return;
+			}
+		}
+		// Not an image — let the browser handle normal text paste
+	}
 </script>
 
 <div class="composer-wrap" class:disabled>
@@ -105,6 +132,7 @@
 			autosize();
 		}}
 		onkeydown={handleKeydown}
+		onpaste={handlePaste}
 		{placeholder}
 		{disabled}
 		rows="2"
