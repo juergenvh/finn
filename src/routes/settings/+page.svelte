@@ -15,8 +15,6 @@
 	import { onMount, onDestroy } from 'svelte';
 	import AgentForm from '$lib/ui/AgentForm.svelte';
 	import type { AgentFormPayload } from '$lib/ui/AgentForm.svelte';
-	import ChannelForm from '$lib/ui/ChannelForm.svelte';
-	import type { ChannelFormPayload } from '$lib/ui/ChannelForm.svelte';
 	import Modal from '$lib/ui/Modal.svelte';
 
 	type Theme = 'system' | 'light' | 'dark';
@@ -71,11 +69,19 @@
 	let agentChannels = $state<Record<string, { id: string; name: string }[]>>({});
 
 	// ── Channel management state ───────────────────────────────────
-	let channelFormMode = $state<'none' | 'create' | 'edit'>('none');
+	let newChannelMode = $state(false);
+	let newChannelName = $state('');
+	let newChannelDesc = $state('');
+	let newChannelSaving = $state(false);
 	let editingChannel = $state<(typeof channels)[0] | null>(null);
 	let editingChannelMembers = $state<string[]>([]);
 	// agent membership per channel: channelId → array of {id, name}
 	let channelMemberMap = $state<Record<string, { id: string; name: string }[]>>({});
+	// inline channel name/description editing
+	let inlineEditChannelId = $state<string | null>(null);
+	let inlineEditName = $state('');
+	let inlineEditDesc = $state('');
+	let inlineEditSaving = $state(false);
 	let channelDetail = $state<ChannelSettings | null>(null);
 	let loadError = $state<string | null>(null);
 	let saveError = $state<string | null>(null);
@@ -333,55 +339,39 @@
 	}
 
 	// ── Channel CRUD ─────────────────────────────────────────────
-	async function openEditChannel(ch: (typeof channels)[0]) {
-		const res = await fetch(`/api/channels/${ch.id}/members`);
-		const data = res.ok ? await res.json() : { members: [] };
-		editingChannelMembers = (data.members ?? []).map((m: { id: string }) => m.id);
-		editingChannel = ch;
-		channelFormMode = 'edit';
+	function startInlineEdit(ch: (typeof channels)[0]) {
+		inlineEditChannelId = ch.id;
+		inlineEditName = ch.name;
+		inlineEditDesc = ch.description ?? '';
 	}
 
-	async function submitChannelForm(payload: ChannelFormPayload) {
-		if (payload.mode === 'create') {
+	function cancelInlineEdit() { inlineEditChannelId = null; }
+	async function saveNewChannel() {
+		if (!newChannelName.trim()) return;
+		newChannelSaving = true;
+		try {
 			const res = await fetch('/api/channels', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({
-					name: payload.name,
-					description: payload.description,
-					agent_ids: payload.member_agent_ids ?? []
-				})
+				body: JSON.stringify({ name: newChannelName.trim(), description: newChannelDesc.trim() || null, agent_ids: [] })
 			});
-			if (!res.ok) throw new Error((await res.json()).message ?? `HTTP ${res.status}`);
-		} else {
-			if (!editingChannel) return;
-			const res = await fetch(`/api/channels/${editingChannel.id}`, {
+			if (res.ok) { newChannelMode = false; await loadChannels(); await Promise.all([loadAllChannelMembers(), loadAllChannelDetails()]); }
+		} finally { newChannelSaving = false; }
+	}
+
+
+
+	async function saveInlineEdit(chId: string) {
+		if (!inlineEditName.trim()) return;
+		inlineEditSaving = true;
+		try {
+			const res = await fetch(`/api/channels/${chId}`, {
 				method: 'PATCH',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ name: payload.name, description: payload.description })
+				body: JSON.stringify({ name: inlineEditName.trim(), description: inlineEditDesc.trim() || null })
 			});
-			if (!res.ok) throw new Error((await res.json()).message ?? `HTTP ${res.status}`);
-			// Handle member additions/removals
-			const adds = payload.add_member_ids ?? [];
-			const removes = payload.remove_member_ids ?? [];
-			await Promise.all([
-				...adds.map((id) =>
-					fetch(`/api/channels/${editingChannel!.id}/members`, {
-						method: 'POST',
-						headers: { 'content-type': 'application/json' },
-						body: JSON.stringify({ agent_id: id })
-					})
-				),
-				...removes.map((id) =>
-					fetch(`/api/channels/${editingChannel!.id}/members/${id}`, { method: 'DELETE' })
-				)
-			]);
-		}
-		channelFormMode = 'none';
-		editingChannel = null;
-		editingChannelMembers = [];
-		await loadChannels();
-		await loadAllAgentChannels(); // keep agent chip assignments in sync
+			if (res.ok) { inlineEditChannelId = null; await loadChannels(); await loadAllChannelMembers(); }
+		} finally { inlineEditSaving = false; }
 	}
 
 	async function archiveChannel(ch: (typeof channels)[0]) {
@@ -733,7 +723,6 @@
 			>
 				Global
 			</button>
-			<div class="rail-divider">Agents</div>
 			<button
 				type="button"
 				class:active={selected === 'agents'}
@@ -741,7 +730,6 @@
 			>
 				Agents
 			</button>
-			<div class="rail-divider">Channels</div>
 			<button
 				type="button"
 				class:active={selected === 'channels'}
@@ -940,10 +928,31 @@
 
 		{#if selected === 'channels'}
 			<div class="agent-toolbar">
-				<button type="button" class="primary" onclick={() => { channelFormMode = 'create'; editingChannel = null; }}>
+				<button type="button" class="primary" onclick={() => { newChannelMode = true; newChannelName = ''; newChannelDesc = ''; }}>
 					+ New Channel
 				</button>
 			</div>
+
+			{#if newChannelMode}
+				<div class="agent-card new-channel-form">
+					<div class="inline-edit-header">
+						<div class="inline-edit-fields">
+							<input class="inline-name-input" type="text" bind:value={newChannelName}
+								placeholder="Channel name"
+								onkeydown={(e) => { if (e.key === 'Enter') saveNewChannel(); if (e.key === 'Escape') newChannelMode = false; }}
+							/>
+							<input class="inline-desc-input" type="text" bind:value={newChannelDesc}
+								placeholder="Description (optional)"
+								onkeydown={(e) => { if (e.key === 'Enter') saveNewChannel(); if (e.key === 'Escape') newChannelMode = false; }}
+							/>
+						</div>
+						<div class="agent-row-actions">
+							<button type="button" onclick={saveNewChannel} disabled={newChannelSaving}>{newChannelSaving ? '…' : 'Create'}</button>
+							<button type="button" onclick={() => newChannelMode = false}>Cancel</button>
+						</div>
+					</div>
+				</div>
+			{/if}
 
 			{#if channels.length === 0}
 				<p class="note empty">No channels yet.</p>
@@ -951,17 +960,36 @@
 				<div class="agent-list">
 					{#each channels as ch (ch.id)}
 						<div class="agent-card">
-							<div class="agent-card-header">
-								<div class="agent-info">
-									<span class="dot"></span>
-									<span class="agent-name">#{ch.name}</span>
-									{#if ch.description}<span class="agent-type">{ch.description}</span>{/if}
+							{#if inlineEditChannelId === ch.id}
+								<div class="inline-edit-header">
+									<div class="inline-edit-fields">
+										<input class="inline-name-input" type="text" bind:value={inlineEditName}
+											placeholder="Channel name"
+											onkeydown={(e) => { if (e.key === 'Enter') saveInlineEdit(ch.id); if (e.key === 'Escape') cancelInlineEdit(); }}
+										/>
+										<input class="inline-desc-input" type="text" bind:value={inlineEditDesc}
+											placeholder="Description (optional)"
+											onkeydown={(e) => { if (e.key === 'Enter') saveInlineEdit(ch.id); if (e.key === 'Escape') cancelInlineEdit(); }}
+										/>
+									</div>
+									<div class="agent-row-actions">
+										<button type="button" onclick={() => saveInlineEdit(ch.id)} disabled={inlineEditSaving}>{inlineEditSaving ? '…' : 'Save'}</button>
+										<button type="button" onclick={cancelInlineEdit}>Cancel</button>
+									</div>
 								</div>
-								<div class="agent-row-actions">
-									<button type="button" onclick={() => openEditChannel(ch)}>Edit</button>
-									<button type="button" class="danger" onclick={() => archiveChannel(ch)}>Archive</button>
+							{:else}
+								<div class="agent-card-header">
+									<div class="agent-info">
+										<span class="dot"></span>
+										<span class="agent-name">#{ch.name}</span>
+										{#if ch.description}<span class="agent-type">{ch.description}</span>{/if}
+									</div>
+									<div class="agent-row-actions">
+										<button type="button" onclick={() => startInlineEdit(ch)}>Edit</button>
+										<button type="button" class="danger" onclick={() => archiveChannel(ch)}>Archive</button>
+									</div>
 								</div>
-							</div>
+							{/if}
 							<div class="agent-channels">
 								<span class="channels-label">Agents:</span>
 								{#each (channelMemberMap[ch.id] ?? []) as m (m.id)}
@@ -1035,23 +1063,6 @@
 	</main>
 </div>
 
-{#if channelFormMode !== 'none'}
-	<Modal
-		open={true}
-		title={channelFormMode === 'create' ? 'New Channel' : 'Edit Channel'}
-		onClose={() => { channelFormMode = 'none'; editingChannel = null; editingChannelMembers = []; }}
-	>
-		<ChannelForm
-			mode={channelFormMode === 'create' ? 'create' : 'edit'}
-			channel={editingChannel ?? undefined}
-			allAgents={agentsList}
-			currentMemberIds={editingChannelMembers}
-			onSubmit={submitChannelForm}
-			onCancel={() => { channelFormMode = 'none'; editingChannel = null; editingChannelMembers = []; }}
-		/>
-	</Modal>
-{/if}
-
 {#if agentFormMode !== 'none'}
 	<Modal
 		open={true}
@@ -1078,13 +1089,15 @@
 	.settings-page {
 		display: grid;
 		grid-template-columns: 240px 1fr;
-		min-height: 100vh;
+		height: 100vh;
+		overflow: hidden;
 	}
 
 	.rail {
 		border-right: 1px solid var(--finn-border);
 		padding: var(--finn-space-4);
 		background: var(--finn-bg-elevated);
+		overflow-y: auto;
 	}
 
 	.rail h2 {
@@ -1124,15 +1137,6 @@
 		font-weight: 600;
 	}
 
-	.rail-divider {
-		margin-top: 12px;
-		padding: 4px 10px;
-		font-size: var(--finn-text-xs);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--finn-text-muted);
-	}
-
 
 
 	.rail-foot {
@@ -1155,13 +1159,6 @@
 		min-height: 0;
 	}
 
-	/* agent-list in pane: 2-column grid when space allows */
-	.pane .agent-list {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-		gap: 0.6rem;
-		align-items: start;
-	}
 
 	.note {
 		color: var(--finn-text-secondary);
@@ -1410,6 +1407,37 @@
 		font-size: var(--finn-text-xs);
 		cursor: pointer;
 	}
+	/* Inline name/description editing */
+	.inline-edit-header {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.75rem;
+		padding: 0.6rem 0.85rem;
+	}
+	.inline-edit-fields { display: flex; flex-direction: column; gap: 0.3rem; flex: 1; min-width: 0; }
+	.inline-name-input {
+		background: var(--finn-bg-input);
+		border: 1px solid var(--finn-accent);
+		color: var(--finn-text-primary);
+		padding: 0.25rem 0.5rem;
+		font-family: inherit;
+		font-size: var(--finn-text-sm);
+		font-weight: 600;
+		border-radius: var(--finn-radius-sm);
+		width: 100%;
+	}
+	.inline-desc-input {
+		background: var(--finn-bg-input);
+		border: 1px solid var(--finn-border);
+		color: var(--finn-text-secondary);
+		padding: 0.2rem 0.5rem;
+		font-family: inherit;
+		font-size: var(--finn-text-xs);
+		border-radius: var(--finn-radius-sm);
+		width: 100%;
+	}
+	.inline-name-input:focus, .inline-desc-input:focus { outline: none; border-color: var(--finn-accent); }
+
 	/* Inline channel settings — auto-saves on blur/change, no Save button */
 	.ch-settings-form {
 		padding: 0.6rem 0.85rem;
