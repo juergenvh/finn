@@ -2,6 +2,7 @@
 	import { Carta, MarkdownEditor } from 'carta-md';
 	import 'carta-md/default.css';
 	import DOMPurify from 'dompurify';
+	import { browser } from '$app/environment';
 
 	type Props = {
 		value: string;
@@ -22,6 +23,7 @@
 	}: Props = $props();
 
 	// Internal state — Carta owns this; we sync outward via $effect
+	// svelte-ignore state_referenced_locally -- intentional: initial value only, $effect syncs inward
 	let internalValue = $state(value);
 
 	// Sync inward when parent draft changes (e.g. after send clears it,
@@ -37,8 +39,14 @@
 		}
 	});
 
+	// DOMPurify requires a DOM — skip sanitization on SSR (server never renders user HTML anyway)
+	const sanitize =
+		browser && typeof DOMPurify.sanitize === 'function'
+			? (html: string) => DOMPurify.sanitize(html) as string
+			: (html: string) => html;
+
 	const carta = new Carta({
-		sanitizer: (html) => DOMPurify.sanitize(html)
+		sanitizer: sanitize
 	});
 
 	function handleKeydown(e: KeyboardEvent) {
