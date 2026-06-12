@@ -66,14 +66,22 @@
 	}
 	.carta-wrap.disabled { opacity: 0.5; pointer-events: none; }
 
-	/* Hide the Write/Preview tab bar — editor only */
-	.carta-wrap :global(.carta-tabs) { display: none; }
+	/* Hide Write/Preview toggle buttons — editor-only, no preview */
+	.carta-wrap :global(.carta-toolbar-left) { display: none !important; }
+	/* Keep renderer permanently hidden */
+	.carta-wrap :global(.carta-renderer) { display: none !important; }
 
-	/* Carta wrapper: transparent, no border */
+	/* .carta-wrapper is the single visual box */
 	.carta-wrap :global(.carta-wrapper) {
-		background: transparent;
-		border: none;
-		border-radius: 0;
+		background: var(--finn-bg-input);
+		border: 1px solid var(--finn-border);
+		border-radius: var(--finn-radius-md);
+		overflow: hidden;
+		transition: border-color var(--finn-transition-fast);
+	}
+	.carta-wrap:focus-within :global(.carta-wrapper) {
+		border-color: var(--finn-accent);
+		box-shadow: 0 0 0 2px var(--finn-accent-glow);
 	}
 
 	/* Toolbar */
