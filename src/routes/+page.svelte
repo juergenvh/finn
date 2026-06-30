@@ -109,6 +109,11 @@
 
 	/* ---------- composer ---------- */
 
+	/** Underlying textarea inside <MarkdownComposer>, bound below. The
+	 * @mention autocomplete reads its caret position and restores the
+	 * selection after inserting a mention. */
+	let composer: HTMLTextAreaElement | undefined = $state();
+
 	/** Per-channel draft storage. The `draft` derived below exposes
 	 * the active channel's entry as a simple read/write surface so
 	 * the rest of the component doesn't need to know about the map.
@@ -972,10 +977,7 @@
 		detectMentionAtCaret();
 	}
 
-	// Issue #89: grow the composer textarea with its content up to a
-	// sensible cap, then scroll inside the box. Pure DOM manipulation
-	// is fine here because there is exactly one composer per page and
-	
+	// Issue #89 (composer autosize) now lives inside MarkdownComposer.
 
 	/* ---------- channel + agent CRUD ---------- */
 
@@ -1439,6 +1441,7 @@
 				onSelect={selectMention}
 			/>
 			<MarkdownComposer
+				bind:element={composer}
 				value={draft.value}
 				onvalue={(v) => { draft.value = v; onComposerInput(); }}
 				onsubmit={send}

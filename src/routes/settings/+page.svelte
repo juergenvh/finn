@@ -90,6 +90,8 @@
 	let newAgentDraft = $state<AgentDraft>(freshDraft());
 	// channel membership per agent: agentId → array of {id, name}
 	let agentChannels = $state<Record<string, { id: string; name: string }[]>>({});
+	// hidden <input type=file> for "Load agent from JSON" (bound in markup below)
+	let loadAgentInput: HTMLInputElement | null = $state(null);
 
 	// ── Channel management state ───────────────────────────────────
 	let newChannelMode = $state(false);
@@ -764,7 +766,7 @@
 </svelte:head>
 
 
-{#snippet agentEditFields(d, patch)}
+{#snippet agentEditFields(d: AgentDraft, patch: (p: Partial<AgentDraft>) => void)}
 	<div class="agent-edit-section">
 		<div class="field">
 			<label for="ae-name">Name</label>
