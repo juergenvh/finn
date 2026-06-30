@@ -14,6 +14,11 @@
 		onkeydown?: (e: KeyboardEvent) => void;
 		disabled?: boolean;
 		placeholder?: string;
+		/**
+		 * Bindable reference to the underlying textarea. The parent needs it
+		 * to drive @mention autocomplete (caret position + setSelectionRange).
+		 */
+		element?: HTMLTextAreaElement;
 	};
 
 	let {
@@ -22,10 +27,12 @@
 		onsubmit,
 		onkeydown,
 		disabled = false,
-		placeholder = 'Message…'
+		placeholder = 'Message…',
+		element = $bindable()
 	}: Props = $props();
 
-	let ta: HTMLTextAreaElement | undefined = $state();
+	// Internal alias kept so the rest of the component reads naturally.
+	let ta = $derived(element);
 
 	function handleKeydown(e: KeyboardEvent) {
 		// Keyboard shortcuts
@@ -125,7 +132,7 @@
 	</div>
 
 	<textarea
-		bind:this={ta}
+		bind:this={element}
 		{value}
 		oninput={(e) => {
 			onvalue((e.currentTarget as HTMLTextAreaElement).value);
