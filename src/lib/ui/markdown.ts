@@ -27,10 +27,11 @@ import type { AgentInfo } from './types';
  * tag is on its default allowlist and we never added it to
  * FORBID_TAGS). What changes with ADR-0023 is the *boundary*:
  *
- *   - src must start with `https://` (block http:, data:, blob:,
- *     and anything else by removing the src attribute when the
- *     scheme doesn't match -- DOMPurify already blocks
- *     `javascript:` etc. but we pin the contract here)
+ *   - src must start with `https://` or be an allowed
+ *     `data:image/*` URI (raster only), removing the src
+ *     attribute for anything else (http:, blob:, and so on) --
+ *     DOMPurify already blocks `javascript:` etc. but we pin the
+ *     contract here
  *   - attributes allowed on <img> are exactly `src, alt, title`
  *     (no srcset, style, width, height, crossorigin, etc.)
  *   - every rendered <img> gets `loading="lazy"` and
@@ -169,12 +170,22 @@ const SANITIZE_CONFIG: DOMPurifyConfig = {
  *  1. `<a href="data:...">` is stripped. We don't render images
  *     today's user-pasted via `<a>`, and bare `data:` links in
  *     bubble bodies are almost always confusable surfaces.
- *  2. `<img src>` is restricted to `https://` per ADR-0023 §2.
- *     Anything else (http:, data:, blob:, file:, etc.) gets the
- *     src attribute removed, leaving an alt-only `<img>` that
- *     the browser renders as the alt text. The `data-img-
- *     fallback-*` attributes carry the original markdown source
- *     so the post-process step can render a literal-text
+ *  2. `<img src>` is restricted to `https://` or a `data:image/*`
+ *     data URI (raster types only — no `svg+xml`, which some
+ *     browsers have historically mishandled as an image-context
+ *     script vector) per ADR-0023 §2. ADR-0023 explicitly deferred
+ *     `data:` support ("re-enabled when the data-URL ADR ships...
+ *     designed so that adding data: ... later is an additive
+ *     allowlist change, not a re-architecture") pending a place to
+ *     paste images from — the composer paste feature (#180) is
+ *     that place, and MarkdownComposer enforces the corresponding
+ *     size cap at paste time (issue #216 / U3) so this doesn't
+ *     reopen the KB-budget-bloat concern the ADR raised for
+ *     `data:` specifically. Anything else (http:, blob:, file:,
+ *     etc.) gets the src attribute removed, leaving an alt-only
+ *     `<img>` that the browser renders as the alt text. The
+ *     `data-img-fallback-*` attributes carry the original markdown
+ *     source so the post-process step can render a literal-text
  *     fallback even when src is intact (load-time failure path).
  *  3. `<img>` attributes are narrowed to `src, alt, title` only.
  *     Anything else (srcset, style, width, height, crossorigin,
@@ -184,6 +195,12 @@ const SANITIZE_CONFIG: DOMPurifyConfig = {
  * Hook installs once.
  */
 const IMG_ALLOWED_ATTRS = new Set(['src', 'alt', 'title']);
+
+/** Raster-only; see the `<img>` policy comment below for why `svg+xml`
+ * is excluded. Matches what MarkdownComposer's paste handler produces
+ * (browsers report pasted screenshots as image/png almost universally,
+ * occasionally image/jpeg or image/gif/webp). */
+const DATA_IMAGE_SRC_PATTERN = /^data:image\/(png|jpe?g|gif|webp);base64,/i;
 
 let hooksInstalled = false;
 function installHooksOnce(): void {
@@ -231,12 +248,12 @@ function installHooksOnce(): void {
 			img.setAttribute('data-img-fallback-src', src);
 			img.setAttribute('data-img-fallback-alt', alt);
 
-			// Drop src if scheme isn't https://. Leaving the <img>
-			// with only alt+fallback-data renders as alt-text in
-			// browsers (existing accessibility behaviour), and the
-			// post-process step will replace it with the literal
-			// markdown text per ADR-0023 §4.
-			if (!/^https:\/\//i.test(src)) {
+			// Drop src unless it's https:// or an allowed data:image/*
+			// URI. Leaving the <img> with only alt+fallback-data
+			// renders as alt-text in browsers (existing accessibility
+			// behaviour), and the post-process step will replace it
+			// with the literal markdown text per ADR-0023 §4.
+			if (!/^https:\/\//i.test(src) && !DATA_IMAGE_SRC_PATTERN.test(src)) {
 				img.removeAttribute('src');
 			}
 

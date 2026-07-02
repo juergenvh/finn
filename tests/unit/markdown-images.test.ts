@@ -29,6 +29,7 @@ import createDOMPurify from 'dompurify';
 // this drifts from production, the test stops matching the
 // surface, which is the failure mode we want.
 const IMG_ALLOWED_ATTRS = new Set(['src', 'alt', 'title']);
+const DATA_IMAGE_SRC_PATTERN = /^data:image\/(png|jpe?g|gif|webp);base64,/i;
 
 type Sanitizer = ReturnType<typeof createDOMPurify>;
 let dp: Sanitizer;
@@ -63,7 +64,7 @@ beforeAll(() => {
 			const alt = img.getAttribute('alt') ?? '';
 			img.setAttribute('data-img-fallback-src', src);
 			img.setAttribute('data-img-fallback-alt', alt);
-			if (!/^https:\/\//i.test(src)) {
+			if (!/^https:\/\//i.test(src) && !DATA_IMAGE_SRC_PATTERN.test(src)) {
 				img.removeAttribute('src');
 			}
 			const names: string[] = [];
@@ -117,10 +118,23 @@ describe('image sanitisation (ADR-0023)', () => {
 		expect(firstImgAttr(out, 'data-img-fallback-src')).toBe('http://example.com/cat.png');
 	});
 
-	it('strips src on data:image/* URLs (v1 deferral, ADR-0023 §1)', () => {
-		const out = clean('<img src="data:image/png;base64,abc" alt="x">');
+	it('passes data:image/{png,jpeg,gif,webp} URLs through (issue #216 / U3, un-defers ADR-0023 §1)', () => {
+		for (const mime of ['png', 'jpeg', 'jpg', 'gif', 'webp']) {
+			const src = `data:image/${mime};base64,abc`;
+			const out = clean(`<img src="${src}" alt="x">`);
+			expect(firstImgSrc(out), `mime: ${mime}`).toBe(src);
+			expect(firstImgAttr(out, 'data-img-fallback-src'), `mime: ${mime}`).toBe(src);
+		}
+	});
+
+	it('still strips src on data:image/svg+xml (excluded from the raster-only allowlist)', () => {
+		const out = clean('<img src="data:image/svg+xml;base64,abc" alt="x">');
 		expect(firstImgSrc(out)).toBeNull();
-		expect(firstImgAttr(out, 'data-img-fallback-src')).toBe('data:image/png;base64,abc');
+	});
+
+	it('still strips src on non-image data: URIs', () => {
+		const out = clean('<img src="data:text/html,<script>x</script>" alt="x">');
+		expect(firstImgSrc(out)).toBeNull();
 	});
 
 	it('strips src on file://, blob:, javascript: schemes', () => {

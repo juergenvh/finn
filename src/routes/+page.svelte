@@ -73,7 +73,13 @@
 
 	let ws: WebSocket | null = $state(null);
 	let connected = $state(false);
+	/** True while a dropped connection is being retried (issue #217 / U4).
+	 * Distinct from `connected` so the status indicator and composer can
+	 * tell "never connected / gave up" apart from "actively retrying". */
+	let reconnecting = $state(false);
 	let bootstrapError: string | null = $state(null);
+	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	let reconnectAttempt = $state(0);
 
 	/* ---------- domain state ---------- */
 
@@ -277,39 +283,77 @@
 			}
 		});
 
+		const observeChild = (node: Node) => {
+			if (node instanceof HTMLElement) observer.observe(node);
+		};
+
 		// Observe both the scroller (height changes from window
 		// resize) and its scrollable child container so internal
 		// growth (new bubbles, taller bubbles) reaches us.
 		observer.observe(scroller);
-		for (const child of Array.from(scroller.children)) {
-			if (child instanceof HTMLElement) observer.observe(child);
-		}
+		for (const child of Array.from(scroller.children)) observeChild(child);
+
+		// This effect's dependencies are just `messageScroller`, so it
+		// only runs once, at mount — when the message list is typically
+		// still empty. Bubbles added afterwards were never added to the
+		// ResizeObserver above, and the observer on `scroller` itself
+		// doesn't fire for pure content overflow (its own box size is
+		// fixed by CSS; only its *scrollable* content grows). Net effect:
+		// the auto-follow behaviour was inert for the common case of a
+		// brand-new bubble streaming in. Watch the child list directly
+		// and register each newly-added bubble for resize tracking too.
+		// See issue #218 / U5.
+		const mutationObserver = new MutationObserver((mutations) => {
+			for (const mutation of mutations) {
+				for (const node of Array.from(mutation.addedNodes)) observeChild(node);
+			}
+		});
+		mutationObserver.observe(scroller, { childList: true });
 
 		return () => {
 			scroller.removeEventListener('scroll', trackPosition);
 			observer.disconnect();
+			mutationObserver.disconnect();
 		};
 	});
 
 	/**
-	 * Initial scroll on channel switch. The ResizeObserver above
-	 * handles ongoing growth, but a freshly-loaded channel needs a
-	 * one-shot snap-to-bottom: the scroller already exists, the
-	 * messages just landed inside it, so the observer fires — but
-	 * `wasAtBottom` was sampled while the previous channel's content
-	 * was still showing, and may have been false. Force the snap on
-	 * activeChannel change to give the user the standard
-	 * "land at the latest message" experience.
+	 * Initial scroll on channel switch. The ResizeObserver above handles
+	 * ongoing growth, but a freshly-activated channel needs a one-shot
+	 * snap-to-bottom: the scroller already exists, the messages just
+	 * landed inside it, so the observer fires — but `wasAtBottom` was
+	 * sampled while the previous channel's content was still showing,
+	 * and may have been false.
+	 *
+	 * `messagesByChannel[activeChannelId]` gets a new array identity on
+	 * every incoming message (see the immutable-update pattern used
+	 * throughout this file), so reading its `.length` to detect "the
+	 * channel's messages have landed" also makes this effect re-run on
+	 * *every subsequent message* in the same channel, not just the
+	 * initial load — which force-scrolled the view to the bottom on
+	 * every delta regardless of where the user had scrolled to. Track
+	 * "have we done the one-shot snap for this activation" explicitly so
+	 * growth after that point is left entirely to the ResizeObserver
+	 * effect above, which already respects the user's scroll position.
+	 * See issue #218 / U5.
 	 */
+	let snapPendingForChannelId: string | null = null;
+	let snappedForChannelId: string | null = null;
 	$effect(() => {
 		if (!activeChannelId) return;
 		const scroller = messageScroller;
 		if (!scroller) return;
-		// Read the message list to register dependency — fires when
-		// the channel's first messages land too.
+
+		if (activeChannelId !== snapPendingForChannelId && activeChannelId !== snappedForChannelId) {
+			snapPendingForChannelId = activeChannelId;
+		}
+		if (activeChannelId !== snapPendingForChannelId) return; // already snapped this activation
+
 		const list = messagesByChannel[activeChannelId];
-		if (!list) return;
-		void list.length;
+		if (!list || list.length === 0) return; // wait for messages to land
+
+		snapPendingForChannelId = null;
+		snappedForChannelId = activeChannelId;
 		void tick().then(() => {
 			if (!suppressNextScroll) snapToBottom(scroller);
 		});
@@ -610,14 +654,39 @@
 		return channels[0]!.id;
 	}
 
+	/**
+	 * Connect (or reconnect) the WebSocket. On a dropped connection, retries
+	 * with capped exponential backoff instead of leaving the app silently
+	 * unusable until a manual reload (issue #217 / U4) — previously
+	 * `onclose` only flipped `connected = false` and stopped there.
+	 *
+	 * On a *re*-connect (attempt > 0), also reloads the active channel so
+	 * any messages broadcast while we were offline are reconciled, since
+	 * there is no server-side replay of missed broadcasts.
+	 */
 	function connect() {
+		if (reconnectTimer) {
+			clearTimeout(reconnectTimer);
+			reconnectTimer = null;
+		}
+		const wasReconnect = reconnectAttempt > 0;
 		const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 		const socket = new WebSocket(`${proto}//${location.host}/ws`);
 		socket.onopen = () => {
 			connected = true;
+			reconnecting = false;
+			reconnectAttempt = 0;
+			if (wasReconnect && activeChannelId) {
+				void loadChannelData(activeChannelId);
+			}
 		};
 		socket.onclose = () => {
 			connected = false;
+			ws = null;
+			reconnecting = true;
+			reconnectAttempt += 1;
+			const delayMs = Math.min(1000 * 2 ** (reconnectAttempt - 1), 15000);
+			reconnectTimer = setTimeout(connect, delayMs);
 		};
 		socket.onmessage = (ev) => {
 			let msg: WSInbound;
@@ -1296,6 +1365,7 @@
 	});
 
 	onDestroy(() => {
+		if (reconnectTimer) clearTimeout(reconnectTimer);
 		ws?.close();
 		if (searchDebounce) clearTimeout(searchDebounce);
 	});
@@ -1313,7 +1383,16 @@
 			<div class="brand-compact">
 				<span class="brand-logo">F</span>
 				<span class="brand-name">finn</span>
-				<span class="status" class:on={connected} title={connected ? 'connected' : 'disconnected'}>{connected ? '●' : '○'}</span>
+				<span
+				class="status"
+				class:on={connected}
+				class:reconnecting
+				title={connected ? 'connected' : reconnecting ? `reconnecting… (attempt ${reconnectAttempt})` : 'disconnected'}
+				>{connected ? '●' : reconnecting ? '◐' : '○'}</span
+			>
+			{#if reconnecting}
+				<span class="reconnect-banner">Reconnecting…</span>
+			{/if}
 			</div>
 
 			<div class="channel-picker">
@@ -1806,6 +1885,18 @@
 	.status.on {
 		color: var(--finn-success);
 	}
+	.status.reconnecting {
+		color: var(--finn-warning);
+		animation: finn-pulse 1.2s ease-in-out infinite;
+	}
+	.reconnect-banner {
+		font-size: var(--finn-text-xs);
+		color: var(--finn-text-muted);
+	}
+	@keyframes finn-pulse {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0.4; }
+	}
 
 	/* ── Main content area ───────────────────────────────────── */
 	.main {
@@ -1859,6 +1950,12 @@
 		border-radius: var(--finn-radius-sm);
 	}
 	footer {
+		/* MentionPopup renders as a direct child (see markup below) and
+		 * positions itself `absolute` relative to the nearest positioned
+		 * ancestor. Without this, it resolves against the initial
+		 * containing block and renders off-screen above the viewport
+		 * instead of anchored to the composer. See issue #214 / U1. */
+		position: relative;
 		flex: 0 0 auto;
 		display: flex;
 		gap: 0.5rem;

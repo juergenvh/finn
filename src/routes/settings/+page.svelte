@@ -129,6 +129,9 @@
 	let channelEditsMap = $state<Record<string, ChEdit>>({});
 
 	let ws: WebSocket | null = null;
+	let wsStopped = false;
+	let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	let wsReconnectAttempt = 0;
 
 	// $derived (not a plain function) so the Save / Discard buttons
 	// re-evaluate when editGlobal / editChannel mutate. Plain function
@@ -684,16 +687,33 @@
 		});
 	}
 
+	/**
+	 * Connect (or reconnect) the WS used for cross-tab live refresh. Same
+	 * path as the main app's WS; we only listen for the settings/agents/
+	 * channels entities, everything else is ignored.
+	 *
+	 * Previously had no `onclose`/`onerror` at all — a dropped connection
+	 * silently stopped delivering live updates forever, with no retry and
+	 * no indicator. See issue #217 / U4.
+	 */
 	function connectWs() {
-		// Same path as the main app's WS (/ws). We only listen for the
-		// settings entity; everything else is ignored.
 		const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 		const url = `${proto}//${window.location.host}/ws`;
+		let socket: WebSocket;
 		try {
-			ws = new WebSocket(url);
+			socket = new WebSocket(url);
 		} catch {
+			scheduleWsReconnect();
 			return;
 		}
+		ws = socket;
+		socket.onopen = () => {
+			wsReconnectAttempt = 0;
+		};
+		socket.onclose = () => {
+			ws = null;
+			scheduleWsReconnect();
+		};
 		ws.onmessage = async (ev) => {
 			let msg: WSStateChanged;
 			try {
@@ -718,6 +738,13 @@
 				await loadChannelDetail(selected);
 			}
 		};
+	}
+
+	function scheduleWsReconnect() {
+		if (wsStopped) return;
+		wsReconnectAttempt += 1;
+		const delayMs = Math.min(1000 * 2 ** (wsReconnectAttempt - 1), 15000);
+		wsReconnectTimer = setTimeout(connectWs, delayMs);
 	}
 
 	// selected is now always 'global' | 'agents' | 'channels'
@@ -749,6 +776,8 @@
 	}
 
 	onDestroy(() => {
+		wsStopped = true;
+		if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
 		ws?.close();
 		ws = null;
 		if (typeof window !== 'undefined') {
