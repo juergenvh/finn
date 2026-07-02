@@ -40,7 +40,10 @@ const { handleApprovalDecide } = await import('./dist-server/handle-approval-dec
 const { handleForwardMessage } = await import('./dist-server/handle-forward.js');
 
 const port = Number(process.env.PORT ?? 3000);
-const host = process.env.HOST ?? '0.0.0.0';
+// finn is single-user, internal-only, and unauthenticated (see docs/decisions
+// for the deployment story). Defaulting to loopback keeps it unreachable from
+// the network unless an operator opts in explicitly. See issue #184.
+const host = process.env.HOST ?? '127.0.0.1';
 
 const server = http.createServer(handler);
 

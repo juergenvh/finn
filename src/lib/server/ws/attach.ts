@@ -46,6 +46,23 @@ import { sweepStaleInflightOnBoot } from '../inflight-writer.ts';
 
 const WS_PATH = '/ws';
 
+/** True if the upgrade's `Origin` header host matches the `Host` it was sent
+ * to (or if there's no Host to compare against, e.g. HTTP/1.0). A missing or
+ * unparseable Origin is treated as a mismatch — real browsers always send it
+ * on a WS handshake, so its absence only happens for non-browser clients we
+ * don't need to support over the network boundary this check protects. */
+function isSameOriginUpgrade(req: IncomingMessage): boolean {
+	const host = req.headers.host;
+	if (!host) return true;
+	const origin = req.headers.origin;
+	if (!origin) return false;
+	try {
+		return new URL(origin).host === host;
+	} catch {
+		return false;
+	}
+}
+
 /* ---- process-wide state for outbound broadcasts ---- */
 
 /**
@@ -283,6 +300,17 @@ export function attachWebSocketServer(httpServer: UpgradableHttpServer, hooks: F
 	httpServer.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
 		const url = new URL(req.url ?? '/', 'http://localhost');
 		if (url.pathname !== WS_PATH) return;
+
+		// WebSockets aren't subject to the browser's same-origin policy, so
+		// without this check any page the operator has open (in any tab) can
+		// connect to this socket and read/send on it (cross-site WebSocket
+		// hijacking). Browsers always send `Origin` on a WS handshake; require
+		// it to match the `Host` the request came in on. See issue #186.
+		if (!isSameOriginUpgrade(req)) {
+			socket.destroy();
+			return;
+		}
+
 		wss.handleUpgrade(req, socket, head, (ws) => {
 			wss.emit('connection', ws, req);
 		});
