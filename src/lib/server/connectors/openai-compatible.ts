@@ -33,6 +33,7 @@
 
 import type { OpenAICompatibleConfig } from '../db/agent-config.ts';
 import { parseSseStream, type SseEvent } from './sse-parser.ts';
+import { connectorTimeoutMs } from './timeout.ts';
 
 type ChatMessage = {
 	role: 'system' | 'user' | 'assistant';
@@ -65,6 +66,8 @@ export type OpenAICompatibleStreamArgs = {
  *   - Mid-stream upstream errors (`finish_reason: "error"` frame).
  *   - Stream end without any content (caller surfaces as
  *     `message_error`).
+ *   - Connect or in-flight stream exceeding `connectorTimeoutMs()`
+ *     (a `TimeoutError`; see ./timeout.ts and issue #193).
  */
 async function* streamReply(
 	args: OpenAICompatibleStreamArgs
@@ -109,7 +112,8 @@ async function* streamReply(
 	const res = await fetch(url, {
 		method: 'POST',
 		headers,
-		body: JSON.stringify(requestBody)
+		body: JSON.stringify(requestBody),
+		signal: AbortSignal.timeout(connectorTimeoutMs())
 	});
 
 	if (!res.ok) {

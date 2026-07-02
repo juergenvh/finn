@@ -76,6 +76,7 @@
 
 import type { OpenclawConfig } from '../db/agent-config.ts';
 import { parseSseStream, type SseEvent } from './sse-parser.ts';
+import { connectorTimeoutMs } from './timeout.ts';
 
 /**
  * Scope set finn declares on every OpenClaw request.
@@ -212,6 +213,8 @@ export type OpenclawStreamArgs = {
  *   - Mid-stream upstream errors (`finish_reason: "error"` frame).
  *   - Stream end without any content (caller surfaces as
  *     `message_error`).
+ *   - Connect or in-flight stream exceeding `connectorTimeoutMs()`
+ *     (a `TimeoutError`; see ./timeout.ts and issue #193).
  */
 async function* streamReply(
 	args: OpenclawStreamArgs
@@ -254,7 +257,8 @@ async function* streamReply(
 			// `[DONE]`. OpenClaw passes this through to upstreams
 			// that honour it (Anthropic, Ollama).
 			stream_options: { include_usage: true }
-		})
+		}),
+		signal: AbortSignal.timeout(connectorTimeoutMs())
 	});
 
 	if (!res.ok) {

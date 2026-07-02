@@ -40,6 +40,7 @@
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
+import { z } from 'zod';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { sweepStaleInflightOnBoot } from '../inflight-writer.ts';
@@ -107,6 +108,40 @@ export type FinnInbound =
 			target_agent_ids: string[];
 	  }
 	| { type: 'ping' };
+
+/**
+ * Runtime counterpart to `FinnInbound`. Unlike the REST routes, this
+ * boundary previously cast `JSON.parse()`'s result straight to
+ * `FinnInbound` with no runtime check, so a malformed or malicious frame
+ * (missing fields, wrong types, an unrecognised `decision` value) flowed
+ * straight into the hooks. That mattered concretely for
+ * `approval_decide`: `decision` is a terminal choice (rejecting an
+ * approval cannot be undone), so treating anything other than the exact
+ * string `"approve"` as an implicit reject silently destroyed the user's
+ * intent on a typo or client bug. Validating here means callers only
+ * ever see the two literal decision values the type already promised.
+ * See issue #196 / SV4.
+ */
+const FinnInboundSchema = z.discriminatedUnion('type', [
+	z.object({
+		type: z.literal('user_message'),
+		channel_id: z.string().min(1),
+		body: z.string()
+	}),
+	z.object({
+		type: z.literal('approval_decide'),
+		approval_id: z.string().min(1),
+		decision: z.enum(['approve', 'reject']),
+		targets: z.array(z.string().min(1)).optional(),
+		reject_reason: z.string().optional()
+	}),
+	z.object({
+		type: z.literal('forward_message'),
+		message_id: z.string().min(1),
+		target_agent_ids: z.array(z.string().min(1))
+	}),
+	z.object({ type: z.literal('ping') })
+]);
 
 /* ---- outbound (broadcasts) ---- */
 
@@ -316,17 +351,40 @@ export function attachWebSocketServer(httpServer: UpgradableHttpServer, hooks: F
 		});
 	});
 
+	// An unhandled 'error' event on an EventEmitter is fatal (Node rethrows
+	// it, crashing the process). `ws` emits 'error' on both the server and
+	// individual sockets for things well outside our control — a client on
+	// a flaky connection sending a malformed frame, an abrupt ECONNRESET,
+	// etc. Without these listeners, one bad client takes down every other
+	// live stream along with the whole HTTP server. See issue #195 / SV3.
+	wss.on('error', (err) => {
+		console.error(`[ws] server error: ${(err as Error).message}`);
+	});
+
 	wss.on('connection', (ws: WebSocket) => {
+		ws.on('error', (err) => {
+			console.error(`[ws] socket error: ${(err as Error).message}`);
+		});
+
 		send(ws, { type: 'system', body: 'connected to finn' });
 
 		ws.on('message', async (raw) => {
-			let parsed: FinnInbound;
+			let json: unknown;
 			try {
-				parsed = JSON.parse(raw.toString());
+				json = JSON.parse(raw.toString());
 			} catch {
 				send(ws, { type: 'system', body: 'invalid json' });
 				return;
 			}
+
+			const result = FinnInboundSchema.safeParse(json);
+			if (!result.success) {
+				const issue = result.error.issues[0];
+				const detail = issue ? `${issue.path.join('.') || '(root)'}: ${issue.message}` : 'malformed payload';
+				send(ws, { type: 'system', body: `invalid message: ${detail}` });
+				return;
+			}
+			const parsed: FinnInbound = result.data;
 
 			if (parsed.type === 'ping') {
 				send(ws, { type: 'pong' });
