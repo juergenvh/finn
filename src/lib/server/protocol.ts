@@ -133,9 +133,25 @@ export function queryProtocol(query: ProtocolQuery): ProtocolPage {
 		}
 	}
 
-	// onlyRejected: requires a join. We do this as a sub-query existence
-	// check in JS (easier than wrestling drizzle for the SQL form): pull
-	// the candidate set, then filter against the approvals table.
+	// onlyRejected: requires a join. We resolve the full set of rejected
+	// message ids up front and add it as a condition *before* the LIMIT
+	// below, rather than filtering the already-limited candidate page —
+	// filtering after LIMIT made both the page contents and `nextCursor`
+	// wrong whenever rejected rows existed outside the first `limit + 1`
+	// unfiltered rows (issue #194 / SV2). Approvals is a much smaller
+	// table than messages, so resolving it unbounded here is cheap.
+	if (query.onlyRejected) {
+		const rejectedRows = db
+			.select({ messageId: approvals.messageId })
+			.from(approvals)
+			.where(eq(approvals.status, 'rejected'))
+			.all();
+		const rejectedIds = rejectedRows.map((r) => r.messageId);
+		if (rejectedIds.length === 0) {
+			return { rows: [], nextCursor: null };
+		}
+		conditions.push(inArray(messages.id, rejectedIds));
+	}
 
 	const whereClause =
 		conditions.length === 0
@@ -144,7 +160,7 @@ export function queryProtocol(query: ProtocolQuery): ProtocolPage {
 				? conditions[0]
 				: and(...conditions);
 
-	let candidateQuery = db
+	const candidateQuery = db
 		.select({
 			id: messages.id,
 			channelId: messages.channelId,
@@ -162,25 +178,9 @@ export function queryProtocol(query: ProtocolQuery): ProtocolPage {
 		.innerJoin(channels, eq(messages.channelId, channels.id))
 		.orderBy(desc(messages.createdAt), desc(messages.id));
 
-	const ordered = whereClause
+	const candidates = whereClause
 		? candidateQuery.where(whereClause).limit(limit + 1).all()
 		: candidateQuery.limit(limit + 1).all();
-
-	let candidates = ordered;
-
-	if (query.onlyRejected) {
-		// Map message-id → rejected? via the approvals table.
-		const ids = candidates.map((c) => c.id);
-		if (ids.length > 0) {
-			const apprRows = db
-				.select()
-				.from(approvals)
-				.where(and(inArray(approvals.messageId, ids), eq(approvals.status, 'rejected')))
-				.all();
-			const rejected = new Set(apprRows.map((a) => a.messageId));
-			candidates = candidates.filter((c) => rejected.has(c.id));
-		}
-	}
 
 	// Build agent-id → name map for sender resolution. Pull all agents
 	// once (the set is small) including soft-deleted, so historical
