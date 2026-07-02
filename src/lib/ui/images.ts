@@ -16,9 +16,9 @@
  *      <img> with a literal-markdown fallback span. Idempotent
  *      via a `data-img-mounted` marker.
  *   3. for <img> elements whose src was already removed by the
- *      sanitiser (scheme didn't match https://), runs the
- *      fallback immediately. Same visual end-state as a runtime
- *      load failure.
+ *      sanitiser (scheme was neither https:// nor an allowed
+ *      data:image/* URI), runs the fallback immediately. Same
+ *      visual end-state as a runtime load failure.
  *
  * Why a post-process step instead of an inline `onerror=\"...\"`
  * attribute: DOMPurify strips inline event handlers (correctly).
@@ -74,9 +74,9 @@ function replaceWithFallback(img: HTMLImageElement): void {
  *
  * The four actions per <img>:
  *
- *   - if there's no `src` (sanitiser dropped it because the
- *     scheme wasn't https), replace with the literal fallback
- *     immediately
+ *   - if there's no `src` (sanitiser dropped it — scheme wasn't
+ *     https or an allowed data:image/* URI), replace with the
+ *     literal fallback immediately
  *   - add `loading=\"lazy\"` and
  *     `referrerpolicy=\"no-referrer\"`
  *   - attach an error listener for runtime load failures

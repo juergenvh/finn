@@ -41,12 +41,17 @@
 			if (e.key === 'i') { e.preventDefault(); wrap('_', '_', 'italic text'); return; }
 			if (e.key === 'e') { e.preventDefault(); wrap('`', '`', 'code'); return; }
 		}
+		// Give the parent first look at the keystroke — e.g. to accept a
+		// highlighted @mention candidate on Enter/Tab — before treating a
+		// bare Enter as "submit the message". Previously this ran the
+		// other way round, so Enter always submitted and the parent's
+		// mention-accept handler never saw it. See issue #215 / U2.
+		onkeydown?.(e);
+		if (e.defaultPrevented) return;
 		if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
 			e.preventDefault();
 			onsubmit();
-			return;
 		}
-		onkeydown?.(e);
 	}
 
 	/** Wrap selection with prefix/suffix, or insert placeholder if nothing selected. */
@@ -94,31 +99,63 @@
 		ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
 	}
 
+	/**
+	 * Pasted images are inlined as base64 `data:` URIs (the renderer
+	 * allows `data:image/*` alongside `https://`, see markdown.ts and
+	 * ADR-0023 §2). Unlike an `https://` image reference, the bytes
+	 * live directly in the message body — DB row, WS frame, and every
+	 * viewer's memory — so unlike ADR-0023 §3's "no byte-size limit"
+	 * stance for linked images, a cap here is load-bearing, not
+	 * optional. See issue #216 / U3 / S5.
+	 */
+	const MAX_PASTE_IMAGE_BYTES = 1_000_000;
+
+	let pasteError = $state<string | null>(null);
+
+	function insertImageMarkdown(dataUrl: string) {
+		if (!ta) return;
+		const start = ta.selectionStart;
+		const before = value.slice(0, start);
+		const after = value.slice(ta.selectionEnd);
+		const sep = before.length > 0 && !before.endsWith('\n') ? '\n' : '';
+		onvalue(before + sep + `![image](${dataUrl})` + '\n' + after);
+		autosize();
+	}
+
+	function readAndInsertImage(file: File) {
+		const reader = new FileReader();
+		reader.onload = () => insertImageMarkdown(reader.result as string);
+		reader.onerror = () => {
+			// Previously silent — a failed read (corrupt clipboard data,
+			// browser quirk) just did nothing, with no sign anything was
+			// even attempted. See issue #216 / U3 / U17.
+			pasteError = 'Could not read pasted image.';
+		};
+		reader.readAsDataURL(file);
+	}
+
 	function handlePaste(e: ClipboardEvent) {
 		const items = e.clipboardData?.items;
 		if (!items) return;
+		let sawImage = false;
 		for (const item of items) {
-			if (item.type.startsWith('image/')) {
-				e.preventDefault();
-				const file = item.getAsFile();
-				if (!file) return;
-				const reader = new FileReader();
-				reader.onload = () => {
-					const dataUrl = reader.result as string;
-					const md = `![image](${dataUrl})`;
-					if (!ta) return;
-					const start = ta.selectionStart;
-					const before = value.slice(0, start);
-					const after = value.slice(ta.selectionEnd);
-					const sep = before.length > 0 && !before.endsWith('\n') ? '\n' : '';
-					onvalue(before + sep + md + '\n' + after);
-					autosize();
-				};
-				reader.readAsDataURL(file);
-				return;
+			if (!item.type.startsWith('image/')) continue;
+			sawImage = true;
+			const file = item.getAsFile();
+			if (!file) continue;
+			if (file.size > MAX_PASTE_IMAGE_BYTES) {
+				pasteError = `Image too large to paste (${Math.round(file.size / 1024)} KB, max ${Math.round(MAX_PASTE_IMAGE_BYTES / 1024)} KB).`;
+				continue;
 			}
+			pasteError = null;
+			readAndInsertImage(file);
 		}
-		// Not an image — let the browser handle normal text paste
+		// Previously only the first clipboard item was ever considered
+		// (an early `return` inside the loop); a multi-image paste
+		// silently dropped everything after the first. See issue #216 /
+		// U3 / U17.
+		if (sawImage) e.preventDefault();
+		// No image items — let the browser handle normal text paste.
 	}
 </script>
 
@@ -135,6 +172,7 @@
 		bind:this={element}
 		{value}
 		oninput={(e) => {
+			pasteError = null;
 			onvalue((e.currentTarget as HTMLTextAreaElement).value);
 			autosize();
 		}}
@@ -144,6 +182,9 @@
 		{disabled}
 		rows="2"
 	></textarea>
+	{#if pasteError}
+		<p class="paste-error" role="alert">{pasteError}</p>
+	{/if}
 </div>
 
 <style>
@@ -215,4 +256,11 @@
 		caret-color: var(--finn-accent);
 	}
 	textarea::placeholder { color: var(--finn-text-disabled); }
+
+	.paste-error {
+		margin: 0;
+		padding: 0.2rem 0.5rem 0.4rem;
+		font-size: var(--finn-text-xs);
+		color: var(--finn-error);
+	}
 </style>
