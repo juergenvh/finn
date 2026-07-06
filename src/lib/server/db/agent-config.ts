@@ -19,12 +19,45 @@ import { z } from 'zod';
 const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 
 /**
+ * RFC1918 private-network ranges: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16.
+ * Deliberately excludes 169.254.0.0/16 (link-local) — that range is where
+ * cloud-provider instance-metadata services live (AWS/GCP/Azure all serve
+ * credentials at 169.254.169.254), so it stays blocked even though it's
+ * technically "local".
+ */
+function isPrivateIPv4(hostname: string): boolean {
+	const m = hostname.match(/^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
+	if (!m) return false;
+	const a = Number(m[1]);
+	const b = Number(m[2]);
+	if (a === 10) return true;
+	if (a === 172 && b >= 16 && b <= 31) return true;
+	if (a === 192 && b === 168) return true;
+	return false;
+}
+
+/**
+ * True for loopback, RFC1918 private IPv4, or an `.local` mDNS hostname —
+ * i.e. hosts only reachable from the same machine or the same LAN. finn's
+ * documented two-machine deployment (README: "Single- and two-machine
+ * setups verified end-to-end") runs the LLM gateway on a second machine on
+ * the same network over plain http — e.g. the seeded agents here point at
+ * an OpenClaw gateway on a LAN/VM address like `192.168.64.2:18789`. That
+ * is exactly the case this allows; it is not the same risk as an
+ * unconstrained SSRF target, since it requires the operator's own network
+ * to already route there.
+ */
+function isLanHost(hostname: string): boolean {
+	return LOOPBACK_HOSTNAMES.has(hostname) || isPrivateIPv4(hostname) || /\.local$/i.test(hostname);
+}
+
+/**
  * A connector `base_url` is fetched server-side with a bearer token attached,
  * so an unconstrained value is an SSRF primitive (arbitrary internal hosts,
- * cloud metadata endpoints). Loopback is allowed over plain http because
- * that's the documented pattern for local gateways (e.g. the seeded dixie
- * agent → OpenClaw on 127.0.0.1:18789); everything else must be https, which
- * at least rules out the trivially-spoofable local network. See issue #185.
+ * cloud metadata endpoints). LAN/loopback hosts are allowed over plain http
+ * because that's the documented deployment pattern (see `isLanHost`);
+ * anything else must be https, which at least rules out the trivially-
+ * spoofable public internet over plaintext. See issue #185.
  */
 function isSafeConnectorUrl(value: string): boolean {
 	let url: URL;
@@ -34,7 +67,7 @@ function isSafeConnectorUrl(value: string): boolean {
 		return false;
 	}
 	if (url.protocol === 'https:') return true;
-	return url.protocol === 'http:' && LOOPBACK_HOSTNAMES.has(url.hostname);
+	return url.protocol === 'http:' && isLanHost(url.hostname);
 }
 
 const connectorBaseUrl = () =>
@@ -42,7 +75,8 @@ const connectorBaseUrl = () =>
 		.string()
 		.url()
 		.refine(isSafeConnectorUrl, {
-			message: 'base_url must be https:, or http: to a loopback address (127.0.0.1/localhost)'
+			message:
+				'base_url must be https:, or http: to a loopback/LAN address (127.0.0.1, 10.x/172.16-31.x/192.168.x, or *.local)'
 		});
 
 /**
