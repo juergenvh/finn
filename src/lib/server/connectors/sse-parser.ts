@@ -106,9 +106,16 @@ type OpenAIStreamFrame = {
  * one delta has been seen. Callers that need stricter behaviour
  * (e.g. detecting silent truncation) should look at the
  * `[DONE]` sentinel via the boolean return below.
+ *
+ * `onChunk`, if given, fires once per raw chunk read from the network
+ * (before it's decoded/parsed into frames) — including chunks that don't
+ * complete a full SSE frame on their own. Callers use this to reset an
+ * idle timeout: any bytes at all mean the connection is alive, which is
+ * a different signal than "a complete frame parsed".
  */
 export async function* parseSseStream(
-	body: ReadableStream<Uint8Array> | null
+	body: ReadableStream<Uint8Array> | null,
+	onChunk?: () => void
 ): AsyncGenerator<SseEvent, void, void> {
 	if (!body) {
 		throw new Error('streaming response had no body');
@@ -123,6 +130,7 @@ export async function* parseSseStream(
 		while (true) {
 			const { done, value } = await reader.read();
 			if (done) break;
+			onChunk?.();
 			buffer += decoder.decode(value, { stream: true });
 
 			// Frames are separated by a blank line, i.e. `\n\n`.
