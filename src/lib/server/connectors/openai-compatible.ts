@@ -33,7 +33,7 @@
 
 import type { OpenAICompatibleConfig } from '../db/agent-config.ts';
 import { parseSseStream, type SseEvent } from './sse-parser.ts';
-import { connectorTimeoutMs } from './timeout.ts';
+import { connectorTimeoutMs, createIdleAbort } from './timeout.ts';
 
 type ChatMessage = {
 	role: 'system' | 'user' | 'assistant';
@@ -66,8 +66,13 @@ export type OpenAICompatibleStreamArgs = {
  *   - Mid-stream upstream errors (`finish_reason: "error"` frame).
  *   - Stream end without any content (caller surfaces as
  *     `message_error`).
- *   - Connect or in-flight stream exceeding `connectorTimeoutMs()`
- *     (a `TimeoutError`; see ./timeout.ts and issue #193).
+ *   - No data at all (not even a partial chunk) for `connectorTimeoutMs()`
+ *     (a `TimeoutError`; see ./timeout.ts and issue #193). This is an
+ *     idle timeout, not a fixed cap on total reply time — it resets on
+ *     connect and on every chunk received. For single-chunk backends
+ *     (Wintermute today, see above) that means the whole non-streamed
+ *     generation still has to fit inside one window, same as before;
+ *     it's genuinely-streaming backends with a long tail that benefit.
  */
 async function* streamReply(
 	args: OpenAICompatibleStreamArgs
@@ -78,6 +83,7 @@ async function* streamReply(
 		token_env_var: tokenEnvVar
 	} = args.config;
 	const apiKey = process.env[tokenEnvVar] ?? '';
+	const idle = createIdleAbort(connectorTimeoutMs());
 
 	const messages: ChatMessage[] = [{ role: 'user', content: args.body }];
 
@@ -109,21 +115,26 @@ async function* streamReply(
 		stream_options: { include_usage: true }
 	};
 
-	const res = await fetch(url, {
-		method: 'POST',
-		headers,
-		body: JSON.stringify(requestBody),
-		signal: AbortSignal.timeout(connectorTimeoutMs())
-	});
+	try {
+		const res = await fetch(url, {
+			method: 'POST',
+			headers,
+			body: JSON.stringify(requestBody),
+			signal: idle.controller.signal
+		});
+		idle.touch(); // headers arrived — reset the idle clock
 
-	if (!res.ok) {
-		const text = await res.text().catch(() => '');
-		throw new Error(
-			`openai-compatible ${res.status}: ${text.slice(0, 200)}`
-		);
+		if (!res.ok) {
+			const text = await res.text().catch(() => '');
+			throw new Error(
+				`openai-compatible ${res.status}: ${text.slice(0, 200)}`
+			);
+		}
+
+		yield* parseSseStream(res.body, idle.touch);
+	} finally {
+		idle.clear();
 	}
-
-	yield* parseSseStream(res.body);
 }
 
 export const openAICompatibleConnector = { streamReply };
